@@ -129,7 +129,7 @@ function YAClock(selector, options) {
 	for (r = this.SECOND; r <=this.SECOND; r++) {
 		for (i = 0; i < this.units[r]; i++) {
 			var length = i%5 == 0 ? 4:2;
-			if(length == 4) {
+			if(length > 2) {
 				var p1 = this.cPoint(this.units[r], i, this.options.circleRadii[r]-length, this.center);
 				var p2 = this.cPoint(this.units[r], i, this.options.circleRadii[r]+length, this.center);
 				this.svg.append("line")
@@ -137,7 +137,7 @@ function YAClock(selector, options) {
 		              	.attr("y1", p1[1])
 						.attr("x2", p2[0])
 		              	.attr("y2", p2[1])
-		              	.attr("stroke-width", (r == 0 || i%5 == 0) ? 3:1)
+		              	.attr("stroke-width", (r == 0 || i%5 == 0) ? 2:1)
 		              	.attr("stroke", "black");
 			}
 		}
