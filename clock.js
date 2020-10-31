@@ -1,6 +1,6 @@
 function YAClock(selector, options) {
     this.options = Object.assign({
-		curveType : "curveNatural",
+		curveTypes : ["curveNatural"],
 		circleRadii : [50,100,150],
 		pointRadii : [3,4,5],
 		pointVisibility : "hidden"
@@ -27,14 +27,18 @@ function YAClock(selector, options) {
 	        .attr("stroke", "black")
 	        .attr("r", 5);
 
-	this.handle = this.svg
+	this.handles = []
+	for(i = 0; i < this.options.curveTypes.length; i++) {
+		this.handles.push(
+		this.svg
 		    .append("path")
 	  		.attr("d", d3.line().curve()([
 				this.center, 
 				this.center
 			]))
 	  		.attr("stroke", "black")
-	  		.attr("fill", "none");
+	  		.attr("fill", "none"));
+	}
 
 	this.circles = [];
 	this.points = [];
@@ -68,10 +72,10 @@ function YAClock(selector, options) {
 		]
 	};
 	
-	this.dHandle = function () {
+	this.dHandle = function (i) {
 		// curveNatural
 		// curveStepAfter
-		return d3.line().curve(d3[this.options.curveType])([
+		return d3.line().curve(d3[this.options.curveTypes[i]])([
 			this.center, 
 			this.points[this.HOUR], 
 			this.points[this.MINUTE],
@@ -109,7 +113,9 @@ function YAClock(selector, options) {
 		this.setSeconds(now.getSeconds());
 		this.setMinutes(now.getMinutes());
 		this.setHours(now.getHours());
-		this.transition(this.handle).attr("d", this.dHandle())
+		for(i = 0; i < this.options.curveTypes.length; i++) {
+			this.transition(this.handles[i]).attr("d", this.dHandle(i))
+		}
 	};
 	
 	this.tick = function () {
