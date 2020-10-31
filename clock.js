@@ -1,6 +1,10 @@
-function YAClock(selector) {
-
+function YAClock(selector, options) {
+    this.options = Object.assign({
+		curveType : "curveNatural",
+		radii : [50,100,150]
+	}, options);
 	this.edgeLength = 400;
+	this.units = [12,60,60];
 	this.svg = d3.select(selector)
 		.append("div")
 		.attr("style","display: inline-block; position: relative; width: 100%; padding-bottom: 100%; vertical-align: top; overflow: hidden;")
@@ -39,14 +43,14 @@ function YAClock(selector) {
 		                          .attr("cy", this.center[1])
 		                          .attr("fill", "none")
 		                          .attr("stroke", "black")
-		                          .attr("r", 6);
+		                          .attr("r", 4);
 
 	this.hourCircle = this.svg.append("circle")
 		                          .attr("cx", this.center[0])
 		                          .attr("cy", this.center[1])
 		                          .attr("fill", "none")
 		                          .attr("stroke", "black")
-		                          .attr("r", 7);    
+		                          .attr("r", 3);    
 		
 	this.start = function () {
 		this.tick();
@@ -69,7 +73,7 @@ function YAClock(selector) {
 	this.dHandle = function () {
 		// curveNatural
 		// curveStepAfter
-		return d3.line().curve(d3.curveNatural)([
+		return d3.line().curve(d3[this.options.curveType])([
 			this.center, 
 			this.hourPoint, 
 			this.minutePoint,
@@ -79,31 +83,35 @@ function YAClock(selector) {
 	
 	this.setSeconds = function (seconds){
 		this.now.setSeconds(seconds);
-		this.secondPoint = this.cPoint(60, seconds, 150, this.center)
-		this.secondCircle .attr("cx", this.secondPoint[0])
+		this.secondPoint = this.cPoint(this.units[2], seconds, this.options.radii[2], this.center)
+		this.transition(this.secondCircle).attr("cx", this.secondPoint[0])
 		                  .attr("cy", this.secondPoint[1]);
 	};
 	
 	this.setMinutes = function (minutes){
 		this.now.setMinutes(minutes);
-		this.minutePoint = this.cPoint(60, minutes, 100, this.center)
-		this.minuteCircle .attr("cx", this.minutePoint[0])
+		this.minutePoint = this.cPoint(this.units[1], minutes, this.options.radii[1], this.center)
+		this.transition(this.minuteCircle).attr("cx", this.minutePoint[0])
 		                  .attr("cy", this.minutePoint[1]);
 	};
 	
 	this.setHours = function (hours){
 		this.now.setHours(hours);
-		this.hourPoint = this.cPoint(24, hours, 50, this.center)
-		this.hourCircle .attr("cx", this.hourPoint[0])
+		this.hourPoint = this.cPoint(this.units[0], hours, this.options.radii[0], this.center)
+		this.transition(this.hourCircle).attr("cx", this.hourPoint[0])
 		                  .attr("cy", this.hourPoint[1]);
 	};
 	
+	this.transition = function (it){
+		return it.transition().duration(1000);
+	};
+		
 	this.setTime = function (now){	
 		this.now = now;
 		this.setSeconds(now.getSeconds());
 		this.setMinutes(now.getMinutes());
 		this.setHours(now.getHours());
-		this.handle.attr("d", this.dHandle())
+		this.transition(this.handle).attr("d", this.dHandle())
 	};
 	
 	this.tick = function () {
@@ -118,5 +126,21 @@ function YAClock(selector) {
 	  .attr("stroke", "black")
       .attr("width",this.edgeLength-2)
       .attr("height", this.edgeLength-2);
+
+	
+	for (r = 2; r < 3; r++) {
+		for (i = 0; i < this.units[r]; i++) {
+			var length = i%5 == 0 ? 4:2;
+			var p1 = this.cPoint(this.units[r], i, this.options.radii[r]-length, this.center);
+			var p2 = this.cPoint(this.units[r], i, this.options.radii[r]+length, this.center);
+			this.svg.append("line")
+					.attr("x1", p1[0])
+	              	.attr("y1", p1[1])
+					.attr("x2", p2[0])
+	              	.attr("y2", p2[1])
+	              	.attr("stroke-width", (r == 0 || i%5 == 0) ? 3:1)
+	              	.attr("stroke", "black");
+		}
+	}
 
 }
