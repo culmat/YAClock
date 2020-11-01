@@ -21,6 +21,8 @@ function YAClock(selector, options) {
 		        .attr("cy", this.center[1])
 		        .attr("stroke", "black")
 		        .attr("r", this.edgeLength / 80);
+		},
+		decorate : function() {
 		}
 	}, options);
 	for(const o in this.options) {
@@ -147,15 +149,9 @@ function YAClock(selector, options) {
 	};
 	
 	this.centerCircle = this.options.drawCenter.bind(this)();
+	this.options.decorate.bind(this)();
 	
 	this.start();
-	this.svg.append("rect")
-      .attr("x", 1)
-      .attr("y", 1)
-	  .attr("fill", "none")
-	  .attr("stroke", "black")
-      .attr("width",this.edgeLength-2)
-      .attr("height", this.edgeLength-2);
 
 	 
 	for(const r in this.options.dials) {
