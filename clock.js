@@ -1,15 +1,14 @@
 function YAClock(selector, options) {
     this.options = Object.assign({
 		curveTypes : ["curveNatural"],
-		circleRadii : [50,100,150],
-		pointRadii : [3,4,5],
-		pointVisibility : "hidden"
+		circleRadii : {HOUR : 50, MINUTE:100, SECOND: 150},
+		marks : {HOUR : 3, MINUTE:4, SECOND: 5}
 	}, options);
 	this.HOUR = 0;
 	this.MINUTE = 1;
 	this.SECOND = 2;
 	this.edgeLength = 400;
-	this.units = [12,60,60];
+	this.units = {HOUR : 12, MINUTE:60, SECOND: 60};
 	this.svg = d3.select(selector)
 		.append("div")
 		.attr("style","display: inline-block; position: relative; width: 100%; padding-bottom: 100%; vertical-align: top; overflow: hidden;")
@@ -40,18 +39,16 @@ function YAClock(selector, options) {
 	  		.attr("fill", "none"));
 	}
 
-	this.circles = [];
-	this.points = [];
+	this.circles = {};
+	this.points = {};
 	
-	for (r = 0; r < 3; r++) {
-		this.circles.push(
-			this.svg.append("circle")
+	for(const p in this.options.marks) {
+		this.circles[p]= this.svg.append("circle")
 	                          .attr("cx", this.center[0])
 	                          .attr("cy", this.center[1])
 	                          .attr("fill", "none")
 	                          .attr("stroke", "black")
-							  .attr("visibility", this.options.pointVisibility)
-	                          .attr("r", this.options.pointRadii[r]));
+	                          .attr("r", this.options.marks[p]);
 	}
 
 	this.start = function () {
@@ -77,31 +74,35 @@ function YAClock(selector, options) {
 		// curveStepAfter
 		return d3.line().curve(d3[this.options.curveTypes[i]])([
 			this.center, 
-			this.points[this.HOUR], 
-			this.points[this.MINUTE],
-			this.points[this.SECOND] 
+			this.points.HOUR, 
+			this.points.MINUTE,
+			this.points.SECOND 
 		]);
 	};
 	
+	this.animate = function(it, x ,y){
+		it.attr("cx", x)
+		  .attr("cy", y);
+	}	
+	
 	this.transitionCircle = function (r ,value){
 		this.points[r] = this.cPoint(this.units[r], value, this.options.circleRadii[r], this.center)
-		this.transition(this.circles[r]).attr("cx", this.points[r][0])
-		                  .attr("cy", this.points[r][1]);
+		if(this.circles[r]) this.animate(this.transition(this.circles[r]), this.points[r][0],this.points[r][1]);
 	};
 	
 	this.setSeconds = function (seconds){
 		this.now.setSeconds(seconds);
-		this.transitionCircle(2, seconds);
+		this.transitionCircle("SECOND", seconds);
 	};
 	
 	this.setMinutes = function (minutes){
 		this.now.setMinutes(minutes);
-		this.transitionCircle(1, minutes);
+		this.transitionCircle("MINUTE", minutes);
 	};
 	
 	this.setHours = function (hours){
 		this.now.setHours(hours);
-		this.transitionCircle(0, hours);
+		this.transitionCircle("HOUR", hours);
 	};
 	
 	this.transition = function (it){
@@ -131,8 +132,8 @@ function YAClock(selector, options) {
       .attr("width",this.edgeLength-2)
       .attr("height", this.edgeLength-2);
 
-	
-	for (r = this.SECOND; r <=this.SECOND; r++) {
+	 
+	["SECOND"].forEach((function(r){  
 		for (i = 0; i < this.units[r]; i++) {
 			var length = i%5 == 0 ? 4:2;
 			if(length > 2) {
@@ -147,7 +148,7 @@ function YAClock(selector, options) {
 		              	.attr("stroke", "black");
 			}
 		}
-	}
+	}).bind(this) );
 	/*
 	for (r = this.HOUR; r <=this.SECOND; r++) {
 		this.svg.append("circle")
@@ -157,7 +158,7 @@ function YAClock(selector, options) {
 	                          .attr("stroke", "#ddd")
 	                          //.attr("stroke-dasharray", "10,5")
 	                          .attr("r", this.options.circleRadii[r]);
-	}
+	}	
 	*/
 
 }
