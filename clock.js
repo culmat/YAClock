@@ -46,7 +46,7 @@ function YAClock(selector, options) {
 	
 	this.handles = {}
 
-	this.circles = {};
+	this.marks = {};
 	this.points = {HOUR : this.center, MINUTE : this.center, SECOND : this.center};
 	
 	this.dHandle = function (ct) {
@@ -79,7 +79,7 @@ function YAClock(selector, options) {
 	}
 	
 	for(const p in this.options.marks) {
-		this.circles[p]= this.svg.append("circle")
+		this.marks[p]= this.svg.append("circle")
 	                          .attr("cx", this.center[0])
 	                          .attr("cy", this.center[1])
 	                          .attr("fill", "none")
@@ -110,24 +110,24 @@ function YAClock(selector, options) {
 		  .attr("cy", y);
 	}	
 	
-	this.transitionCircle = function (r ,value){
+	this.transitionMark = function (r ,value){
 		this.points[r] = this.cPoint(this.units[r], value, this.options.circleRadii[r], this.center)
-		if(this.circles[r]) this.animate(this.transition(this.circles[r]), this.points[r][0],this.points[r][1]);
+		if(this.marks[r]) this.animate(this.transition(this.marks[r]), this.points[r][0],this.points[r][1]);
 	};
 	
 	this.setSeconds = function (seconds){
 		this.now.setSeconds(seconds);
-		this.transitionCircle("SECOND", seconds);
+		this.transitionMark("SECOND", seconds);
 	};
 	
 	this.setMinutes = function (minutes){
 		this.now.setMinutes(minutes);
-		this.transitionCircle("MINUTE", minutes);
+		this.transitionMark("MINUTE", minutes);
 	};
 	
 	this.setHours = function (hours){
 		this.now.setHours(hours);
-		this.transitionCircle("HOUR", hours);
+		this.transitionMark("HOUR", hours);
 	};
 	
 	this.transition = function (it){
