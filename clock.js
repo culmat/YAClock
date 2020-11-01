@@ -153,33 +153,33 @@ function YAClock(selector, options) {
 	
 	this.start();
 
-	 
-	for(const r in this.options.dials) {
-		for (i = 0; i < this.units[r]; i++) {
-			var length = i%5 == 0 ? 4:2;
-			if(length > 2) {
-				var p1 = this.cPoint(this.units[r], i, this.options.circleRadii[r]-length, this.center);
-				var p2 = this.cPoint(this.units[r], i, this.options.circleRadii[r]+length, this.center);
-				this.svg.append("line")
-						.attr("x1", p1[0])
-		              	.attr("y1", p1[1])
-						.attr("x2", p2[0])
-		              	.attr("y2", p2[1])
-		              	.attr("stroke-width", (r == 0 || i%5 == 0) ? 2:1)
-		              	.attr("stroke", "black");
+	this.defaultDial = function (unit,value, withDetails) {
+		var bold = unit == 'HOUR' ? 3 : 5;
+		const isDetail = value%bold != 0;
+		var length = isDetail ? 2:4;
+		if(isDetail && !withDetails) return;
+		var p1 = this.cPoint(this.units[unit], value, this.options.circleRadii[unit]-length, this.center);
+		var p2 = this.cPoint(this.units[unit], value, this.options.circleRadii[unit]+length, this.center);
+		this.svg.append("line")
+				.attr("x1", p1[0])
+              	.attr("y1", p1[1])
+				.attr("x2", p2[0])
+              	.attr("y2", p2[1])
+              	.attr("stroke-width", (unit != 'HOUR' && isDetail) ? 1:2)
+              	.attr("stroke", "black");
+	};	 
+
+	for(const unit in this.options.dials) {
+		for (value = 0; value < this.units[unit]; value++) {
+			console.log(typeof this.options.dials[unit])
+			if(typeof this.options.dials[unit]  == 'boolean') {
+				this.defaultDial(unit,value,this.options.dials[unit]);
+			} else if(typeof this.options.dials[unit]  == 'function') {
+				this.options.dials[unit].bind(this)(unit,value);
+			} else {
+				this.defaultDial(unit,value,true);
 			}
 		}
 	};
-	/*
-	for (r = this.HOUR; r <=this.SECOND; r++) {
-		this.svg.append("circle")
-	                          .attr("cx", this.center[0])
-	                          .attr("cy", this.center[1])
-	                          .attr("fill", "none")
-	                          .attr("stroke", "#ddd")
-	                          //.attr("stroke-dasharray", "10,5")
-	                          .attr("r", this.options.circleRadii[r]);
-	}	
-	*/
 
 }
