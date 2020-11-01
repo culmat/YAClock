@@ -9,11 +9,14 @@ function YAClock(selector, options) {
 		}
 		return a;
 	};
+	this.toValue = function (a) {
+		return (typeof a  == 'function') ? a.bind(this)() : a;
+	};
 	
 	this.options = Object.assign({
 		curveTypes : ["curveNatural"],
 		circleRadii : {HOUR : 50, MINUTE:100, SECOND: 150},
-		marks : {HOUR : 3, MINUTE:4, SECOND: 5},
+		marks : {HOUR : {attr : {r : 3}}, MINUTE: {attr : {r : 4}}, SECOND: {attr : {r : 5}}},
 		dials : ["SECOND"],
 		drawCenter : function() {
 			return this.svg.append("circle")
@@ -84,7 +87,11 @@ function YAClock(selector, options) {
 	                          .attr("cy", this.center[1])
 	                          .attr("fill", "none")
 	                          .attr("stroke", "black")
-	                          .attr("r", this.options.marks[p]);
+	                          .attr("r", 5);
+		const marko = this.options.marks[p];
+		for(const a in marko.attr) {
+			this.marks[p].attr(a,this.toValue(marko.attr[a]));
+		}
 	}
 
 	this.start = function () {
@@ -171,7 +178,6 @@ function YAClock(selector, options) {
 
 	for(const unit in this.options.dials) {
 		for (value = 0; value < this.units[unit]; value++) {
-			console.log(typeof this.options.dials[unit])
 			if(typeof this.options.dials[unit]  == 'boolean') {
 				this.defaultDial(unit,value,this.options.dials[unit]);
 			} else if(typeof this.options.dials[unit]  == 'function') {
