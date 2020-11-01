@@ -1,0 +1,32 @@
+<!DOCTYPE html>
+<html>
+<head>
+<meta charset="UTF-8">
+<title>clock</title>
+<script src="https://d3js.org/d3.v6.min.js"></script>
+<script src="clock.js"></script>
+<style type="text/css">
+.square {
+   width: 98vh;
+   height: 98vh;
+}
+
+
+</style>
+</head>
+<body style="background-color: #fcd6a1;">
+<div class="square"></div>	
+	<script type="text/javascript">
+		
+		new YAClock("div", {
+				curveTypes : ["curveBasisClosed", "curveNatural"],
+				marks : {SECOND : {attr : {fill : "white"}}},
+				dials : {
+					SECOND : function(unit,value){
+					}
+				}
+			});
+		
+	</script>
+</body>
+</html>
