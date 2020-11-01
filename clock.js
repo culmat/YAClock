@@ -14,7 +14,14 @@ function YAClock(selector, options) {
 		curveTypes : ["curveNatural"],
 		circleRadii : {HOUR : 50, MINUTE:100, SECOND: 150},
 		marks : {HOUR : 3, MINUTE:4, SECOND: 5},
-		dials : ["SECOND"]
+		dials : ["SECOND"],
+		drawCenter : function() {
+			return this.svg.append("circle")
+		        .attr("cx", this.center[0])
+		        .attr("cy", this.center[1])
+		        .attr("stroke", "black")
+		        .attr("r", this.edgeLength / 80);
+		}
 	}, options);
 	for(const o in this.options) {
 		this.options[o] = this.toObject(this.options[o]);
@@ -57,7 +64,16 @@ function YAClock(selector, options) {
 		    .append("path")
 	  		.attr("d", this.dHandle(ct))
 	  		.attr("stroke", "black")
+	  		.attr("stroke-linecap", "round")
 	  		.attr("fill", ct.indexOf("Closed") > -1 ?"#ccc":"none");
+		const cto = this.options.curveTypes[ct];
+		if(cto) {
+			if(cto.attr){
+				for(const a in cto.attr) {
+					this.handles[ct].attr(a,cto.attr[a]);
+				}
+			}
+		}
 	}
 	
 	for(const p in this.options.marks) {
@@ -130,11 +146,7 @@ function YAClock(selector, options) {
 		this.setTime(new Date());
 	};
 	
-	this.centerCircle = this.svg.append("circle")
-	        .attr("cx", this.center[0])
-	        .attr("cy", this.center[1])
-	        .attr("stroke", "black")
-	        .attr("r", 5);
+	this.centerCircle = this.options.drawCenter.bind(this)();
 	
 	this.start();
 	this.svg.append("rect")
