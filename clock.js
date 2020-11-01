@@ -26,11 +26,18 @@ function YAClock(selector, options) {
 		        .attr("r", this.edgeLength / 80);
 		},
 		decorate : function() {
+		},
+		background : function() {
+		},
+		onSetTime : function() {
 		}
 	}, options);
 	for(const o in this.options) {
 		this.options[o] = this.toObject(this.options[o]);
 	}
+	this.options.onSetTime = this.options.onSetTime.bind(this);
+	this.options.decorate = this.options.decorate.bind(this);
+	this.options.background = this.options.background.bind(this);
 	this.HOUR = 0;
 	this.MINUTE = 1;
 	this.SECOND = 2;
@@ -63,6 +70,8 @@ function YAClock(selector, options) {
 		]);
 	};
 	
+	this.options.background();
+	
 	for(const ct in this.options.curveTypes) {
 		this.handles[ct] = 
 		this.svg
@@ -89,8 +98,10 @@ function YAClock(selector, options) {
 	                          .attr("stroke", "black")
 	                          .attr("r", 5);
 		const marko = this.options.marks[p];
-		for(const a in marko.attr) {
-			this.marks[p].attr(a,this.toValue(marko.attr[a]));
+		if(marko && marko.attr){
+			for(const a in marko.attr) {
+				this.marks[p].attr(a,this.toValue(marko.attr[a]));
+			}
 		}
 	}
 
@@ -149,6 +160,7 @@ function YAClock(selector, options) {
 		for(const ct in this.options.curveTypes) {
 			this.transition(this.handles[ct]).attr("d", this.dHandle(ct))
 		}
+		this.options.onSetTime();
 	};
 	
 	this.tick = function () {
@@ -156,7 +168,7 @@ function YAClock(selector, options) {
 	};
 	
 	this.centerCircle = this.options.drawCenter.bind(this)();
-	this.options.decorate.bind(this)();
+	this.options.decorate();
 	
 	this.start();
 
