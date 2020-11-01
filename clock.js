@@ -2,7 +2,8 @@ function YAClock(selector, options) {
     this.options = Object.assign({
 		curveTypes : ["curveNatural"],
 		circleRadii : {HOUR : 50, MINUTE:100, SECOND: 150},
-		marks : {HOUR : 3, MINUTE:4, SECOND: 5}
+		marks : {HOUR : 3, MINUTE:4, SECOND: 5},
+		dials : ["SECOND"]
 	}, options);
 	this.HOUR = 0;
 	this.MINUTE = 1;
@@ -20,27 +21,30 @@ function YAClock(selector, options) {
 	    .attr("height", "100%");
 	this.center = [this.edgeLength/2 , this.edgeLength/2];
 	
-	this.centerCircle = this.svg.append("circle")
-	        .attr("cx", this.center[0])
-	        .attr("cy", this.center[1])
-	        .attr("stroke", "black")
-	        .attr("r", 5);
-
 	this.handles = []
+
+	this.circles = {};
+	this.points = {HOUR : this.center, MINUTE : this.center, SECOND : this.center};
+	
+	this.dHandle = function (i) {
+		// curveNatural
+		// curveStepAfter
+		return d3.line().curve(d3[this.options.curveTypes[i]])([
+			this.center, 
+			this.points.HOUR, 
+			this.points.MINUTE,
+			this.points.SECOND 
+		]);
+	};
+
 	for(i = 0; i < this.options.curveTypes.length; i++) {
 		this.handles.push(
 		this.svg
 		    .append("path")
-	  		.attr("d", d3.line().curve()([
-				this.center, 
-				this.center
-			]))
+	  		.attr("d", this.dHandle(i))
 	  		.attr("stroke", "black")
-	  		.attr("fill", "none"));
+	  		.attr("fill", this.options.curveTypes[i].indexOf("Closed") > -1 ?"#ccc":"none"));
 	}
-
-	this.circles = {};
-	this.points = {};
 	
 	for(const p in this.options.marks) {
 		this.circles[p]= this.svg.append("circle")
@@ -68,18 +72,7 @@ function YAClock(selector, options) {
 			(Math.cos(Math.PI*2/unit*value+Math.PI))*radius+center[1]
 		]
 	};
-	
-	this.dHandle = function (i) {
-		// curveNatural
-		// curveStepAfter
-		return d3.line().curve(d3[this.options.curveTypes[i]])([
-			this.center, 
-			this.points.HOUR, 
-			this.points.MINUTE,
-			this.points.SECOND 
-		]);
-	};
-	
+		
 	this.animate = function(it, x ,y){
 		it.attr("cx", x)
 		  .attr("cy", y);
@@ -123,6 +116,12 @@ function YAClock(selector, options) {
 		this.setTime(new Date());
 	};
 	
+	this.centerCircle = this.svg.append("circle")
+	        .attr("cx", this.center[0])
+	        .attr("cy", this.center[1])
+	        .attr("stroke", "black")
+	        .attr("r", 5);
+	
 	this.start();
 	this.svg.append("rect")
       .attr("x", 1)
@@ -133,7 +132,8 @@ function YAClock(selector, options) {
       .attr("height", this.edgeLength-2);
 
 	 
-	["SECOND"].forEach((function(r){  
+	this.options.dials.forEach((function(r){
+		//var r = "SECOND"  	
 		for (i = 0; i < this.units[r]; i++) {
 			var length = i%5 == 0 ? 4:2;
 			if(length > 2) {
