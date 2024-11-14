@@ -5,17 +5,33 @@
 <meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=yes">
 <meta name="apple-mobile-web-app-capable" content="yes">
 <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+<meta name="mobile-web-app-capable" content="yes">
+<meta name="mobile-web-app-status-bar-style" content="black-translucent">
 <title>clock</title>
 <script src="https://d3js.org/d3.v6.min.js"></script>
 <script src="clock.js"></script>
-<style type="text/css">
-.square {
-   width: 98vh;
-   height: 98vh;
-}
+<style>
+    * {
+      margin: 0;
+      padding: 0;
+      box-sizing: border-box;
+    }
 
+    html, body {
+      height: 100%;
+      overflow: hidden;
+      display: flex;
+      justify-content: center;
+      align-items: center;
+    }
 
-</style>
+    .square {
+      width: 100vmin;
+      height: 100vmin;
+      max-width: 100%;
+      max-height: 100%;
+    }
+  </style>
 </head>
 <body style="background-color: #fcd6a1;">
 <div class="square"></div>	
