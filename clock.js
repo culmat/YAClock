@@ -2,7 +2,7 @@ function YAClock(selector, options) {
     this.toObject = function (a) {
 		if(a instanceof Array) {
 			var ret = {}
-			for(i = 0; i < a.length; i++) {
+			for(let i = 0; i < a.length; i++) {
 				ret[a[i]]= null;
 			}
 			return ret;
@@ -15,6 +15,7 @@ function YAClock(selector, options) {
 	
 	this.options = Object.assign({
 		curveTypes : ["curveNatural"],
+		transitionDuration : 1000,
 		circleRadii : {HOUR : 50, MINUTE:100, SECOND: 150},
 		marks : {HOUR : {attr : {r : 3}}, MINUTE: {attr : {r : 4}}, SECOND: {attr : {r : 5}}},
 		dials : ["SECOND"],
@@ -58,15 +59,16 @@ function YAClock(selector, options) {
 
 	this.marks = {};
 	this.points = {HOUR : this.center, MINUTE : this.center, SECOND : this.center};
-	
+	this.lineGens = {};
+
 	this.dHandle = function (ct) {
-		// curveNatural
-		// curveStepAfter
-		return d3.line().curve(d3[ct])([
-			this.center, 
-			this.points.HOUR, 
+		let gen = this.lineGens[ct];
+		if (!gen) gen = this.lineGens[ct] = d3.line().curve(d3[ct]);
+		return gen([
+			this.center,
+			this.points.HOUR,
 			this.points.MINUTE,
-			this.points.SECOND 
+			this.points.SECOND
 		]);
 	};
 	
@@ -112,15 +114,17 @@ function YAClock(selector, options) {
 	};
 	
 	this.stop = function () {
-		if(this.engine) clearInterval(this.engine);
+		if(this.engine) { clearInterval(this.engine); this.engine = null; }
 	};
 	
+	this._twoPiOverN = {};
 	this.cPoint = function (unit, value, radius, center) {
-		value = unit - value;
+		const k = this._twoPiOverN[unit] || (this._twoPiOverN[unit] = (2 * Math.PI) / unit);
+		const a = k * (unit - value) + Math.PI;
 		return [
-			(Math.sin(Math.PI*2/unit*value+Math.PI))*radius+center[0],
-			(Math.cos(Math.PI*2/unit*value+Math.PI))*radius+center[1]
-		]
+			Math.sin(a) * radius + center[0],
+			Math.cos(a) * radius + center[1]
+		];
 	};
 		
 	this.animate = function(it, x ,y){
@@ -129,8 +133,11 @@ function YAClock(selector, options) {
 	}	
 	
 	this.transitionMark = function (r ,value){
-		this.points[r] = this.cPoint(this.units[r], value, this.options.circleRadii[r], this.center)
-		if(this.marks[r]) this.animate(this.transition(this.marks[r]), this.points[r][0],this.points[r][1]);
+		const newPoint = this.cPoint(this.units[r], value, this.options.circleRadii[r], this.center);
+		const oldPoint = this.points[r];
+		this.points[r] = newPoint;
+		if (oldPoint && oldPoint[0] === newPoint[0] && oldPoint[1] === newPoint[1]) return;
+		if(this.marks[r]) this.animate(this.transition(this.marks[r]), newPoint[0], newPoint[1]);
 	};
 	
 	this.setSeconds = function (seconds){
@@ -149,7 +156,7 @@ function YAClock(selector, options) {
 	};
 	
 	this.transition = function (it){
-		return it.transition().duration(1000);
+		return it.transition().duration(this.options.transitionDuration);
 	};
 		
 	this.setTime = function (now){	
@@ -169,8 +176,13 @@ function YAClock(selector, options) {
 	
 	this.centerCircle = this.options.drawCenter.bind(this)();
 	this.options.decorate();
-	
+
 	this.start();
+
+	document.addEventListener("visibilitychange", () => {
+		if (document.hidden) this.stop();
+		else if (!this.engine) this.start();
+	});
 
 	this.defaultDial = function (unit,value, withDetails) {
 		var bold = unit == 'HOUR' ? 3 : 5;
@@ -189,13 +201,31 @@ function YAClock(selector, options) {
 	};	 
 
 	for(const unit in this.options.dials) {
-		for (value = 0; value < this.units[unit]; value++) {
-			if(typeof this.options.dials[unit]  == 'boolean') {
-				this.defaultDial(unit,value,this.options.dials[unit]);
-			} else if(typeof this.options.dials[unit]  == 'function') {
-				this.options.dials[unit].bind(this)(unit,value);
-			} else {
-				this.defaultDial(unit,value,true);
+		const cfg = this.options.dials[unit];
+		if (typeof cfg == 'function') {
+			const fn = cfg.bind(this);
+			for (let value = 0; value < this.units[unit]; value++) fn(unit, value);
+		} else {
+			const withDetails = typeof cfg == 'boolean' ? cfg : true;
+			const bold = unit == 'HOUR' ? 3 : 5;
+			const paths = { 1: "", 2: "" };
+			for (let value = 0; value < this.units[unit]; value++) {
+				const isDetail = value % bold != 0;
+				if (isDetail && !withDetails) continue;
+				const length = isDetail ? 2 : 4;
+				const sw = (unit != 'HOUR' && isDetail) ? 1 : 2;
+				const p1 = this.cPoint(this.units[unit], value, this.options.circleRadii[unit]-length, this.center);
+				const p2 = this.cPoint(this.units[unit], value, this.options.circleRadii[unit]+length, this.center);
+				paths[sw] += "M" + p1[0] + "," + p1[1] + "L" + p2[0] + "," + p2[1];
+			}
+			for (const sw in paths) {
+				if (paths[sw]) {
+					this.svg.append("path")
+						.attr("d", paths[sw])
+						.attr("fill", "none")
+						.attr("stroke", "black")
+						.attr("stroke-width", sw);
+				}
 			}
 		}
 	};
