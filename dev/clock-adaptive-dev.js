@@ -16,7 +16,7 @@
 
     // PROD internals, assigned in attach() from hooks.internals (pure functions + caches).
     let currentLocation, currentWeather, NEUTRAL_WEATHER,
-        computeEnvironment, computeTargetSky, computeTargetInner, computeMoonBrightHsl, fmtHsl,
+        computeEnvironment, computeTargetSky, computeTargetInner, computeMoonBrightHsl, inkForLightness, fmtHsl,
         moonPath, moonPhase, sunPosition, solsticeEquinox, findNextEclipse, eclipsePeak;
 
     // ============================================================
@@ -509,6 +509,7 @@
         const skyHsl = computeTargetSky(env);
         const innerHsl = computeTargetInner(env);
         const moonBrightHsl = computeMoonBrightHsl(env);
+        const ink = fmtHsl(inkForLightness(skyHsl[2]));
 
         const E = 400, C = E / 2;
         const radii = { H: 50, M: 100, S: 150 };
@@ -532,7 +533,7 @@
         const closedP = document.createElementNS(svgNS, 'path');
         closedP.setAttribute('d', closedGen(pts));
         closedP.setAttribute('fill', fmtHsl(innerHsl));
-        closedP.setAttribute('stroke', 'black');
+        closedP.setAttribute('stroke', ink);
         closedP.setAttribute('stroke-width', '1.5');
         closedP.setAttribute('stroke-linecap', 'round');
         svg.appendChild(closedP);
@@ -541,7 +542,7 @@
         const openP = document.createElementNS(svgNS, 'path');
         openP.setAttribute('d', naturalGen(pts));
         openP.setAttribute('fill', 'none');
-        openP.setAttribute('stroke', 'black');
+        openP.setAttribute('stroke', ink);
         openP.setAttribute('stroke-width', '1.5');
         openP.setAttribute('stroke-linecap', 'round');
         svg.appendChild(openP);
@@ -553,7 +554,7 @@
             const ln = document.createElementNS(svgNS, 'line');
             ln.setAttribute('x1', p1[0]); ln.setAttribute('y1', p1[1]);
             ln.setAttribute('x2', p2[0]); ln.setAttribute('y2', p2[1]);
-            ln.setAttribute('stroke', 'black');
+            ln.setAttribute('stroke', ink);
             ln.setAttribute('stroke-width', i % 3 === 0 ? 2 : 1);
             svg.appendChild(ln);
         }
@@ -562,8 +563,8 @@
         const centerC = document.createElementNS(svgNS, 'circle');
         centerC.setAttribute('cx', C); centerC.setAttribute('cy', C);
         centerC.setAttribute('r', E / 80);
-        centerC.setAttribute('stroke', 'black');
-        centerC.setAttribute('fill', 'none');
+        centerC.setAttribute('stroke', ink);
+        centerC.setAttribute('fill', ink);
         svg.appendChild(centerC);
 
         // Moon at SECOND position
@@ -580,7 +581,7 @@
         moonG.appendChild(bright);
         const ol = document.createElementNS(svgNS, 'circle');
         ol.setAttribute('r', moonR); ol.setAttribute('fill', 'none');
-        ol.setAttribute('stroke', 'rgba(0,0,0,0.35)'); ol.setAttribute('stroke-width', '0.8');
+        ol.setAttribute('stroke', ink); ol.setAttribute('stroke-opacity', '0.5'); ol.setAttribute('stroke-width', '0.8');
         moonG.appendChild(ol);
         svg.appendChild(moonG);
 
@@ -644,7 +645,7 @@
     function attach(devHooks) {
         hooks = devHooks;
         ({ currentLocation, currentWeather, NEUTRAL_WEATHER,
-           computeEnvironment, computeTargetSky, computeTargetInner, computeMoonBrightHsl, fmtHsl,
+           computeEnvironment, computeTargetSky, computeTargetInner, computeMoonBrightHsl, inkForLightness, fmtHsl,
            moonPath, moonPhase, sunPosition, solsticeEquinox, findNextEclipse, eclipsePeak } = hooks.internals);
 
         parseHash();

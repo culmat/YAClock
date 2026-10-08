@@ -139,6 +139,20 @@ async function openPage(url) {
   await page.click('#sim-now'); await page.waitForTimeout(300);
   const nowSt = await page.evaluate(() => ({ t: AdaptiveClock._dev.getClock().now.getTime(), sim: AdaptiveClockDev.sim.enabled }));
   check('dev: now button returns to wall time, sim stays on', Math.abs(nowSt.t - Date.now()) < 3000 && nowSt.sim, JSON.stringify(nowSt));
+  // strokes flip to light ink on a dark page (midwinter night; place is Reykjavík here, where a June night stays golden) and back by day
+  const inkL = async () => page.evaluate(() => {
+    const m = /hsl\([\d.]+,[\d.]+%,([\d.]+)%\)/.exec(AdaptiveClock._dev.getClock().handles.curveNatural.attr('stroke'));
+    return m ? Number(m[1]) : null;
+  });
+  await page.evaluate(() => AdaptiveClockDev.setSim({ enabled: true, simTime: new Date('2026-12-21T01:00') }));
+  await page.waitForTimeout(300);
+  const nightInk = await inkL();
+  await page.screenshot({ path: `${OUT}/dev-night.png` });
+  const nightPage = await page.evaluate(() => getComputedStyle(document.body).backgroundColor);
+  await page.evaluate(() => AdaptiveClockDev.setSim({ enabled: true, simTime: new Date('2026-06-21T13:00') }));
+  await page.waitForTimeout(300);
+  const dayInk = await inkL();
+  check('dev: light ink on the night page, dark ink by day', nightInk > 70 && dayInk < 20, `night ${nightInk}% on ${nightPage}, day ${dayInk}%`);
   const stateTxt = await page.textContent('#sim-state');
   check('dev: state readout rendered', /sun .*° .*moon \d+%/.test(stateTxt), stateTxt.replace(/\n/g, ' | '));
   await page.screenshot({ path: `${OUT}/dev-sim.png` });

@@ -30,7 +30,8 @@
         moonPhase: 600000,
         moonShape: 600000,
         dim: 30000,
-        wobble: 6000
+        wobble: 6000,
+        ink: 15000
     };
 
     const STORAGE_KEYS = {
@@ -51,6 +52,13 @@
         { alt:  20,  hsl: [35, 94, 81] },
         { alt:  90,  hsl: [35, 94, 81] }
     ];
+
+    // Ink: every stroke (splines, centre, moon rim) must read on the day parchment and on the
+    // night-dark page alike. Warm near-black by day, warm parchment-light by night.
+    const INK_DARK  = [35, 30, 8];
+    const INK_LIGHT = [35, 60, 88];
+    const INK_TO_LIGHT_BELOW = 38;   // page lightness thresholds with hysteresis, so dusk never flickers
+    const INK_TO_DARK_ABOVE  = 50;
 
     // Inner-area stops: this IS the visible "sky" of the clock — a full daylight palette
     // tracking sun altitude (night blue → twilight orange → golden → sky blue). Weather
@@ -92,7 +100,9 @@
         dimming: 0,             // 0..1 extra dim on inner
         wobblePhase: 0,         // for thunder / golden-hour
         moonTint: null,         // HSL or null
-        innerTintBoost: 0       // golden hour saturation lift
+        innerTintBoost: 0,      // golden hour saturation lift
+        ink: INK_DARK.slice(),  // HSL of all strokes
+        inkIsLight: false       // hysteresis state for the ink choice
     };
 
     let clock = null;
@@ -543,6 +553,17 @@
         return out;
     }
 
+    // Static rule (gallery, first paint): ink for a given page lightness.
+    function inkForLightness(pageL) {
+        return pageL < (INK_TO_LIGHT_BELOW + INK_TO_DARK_ABOVE) / 2 ? INK_LIGHT : INK_DARK;
+    }
+
+    // Live rule: same thresholds but with hysteresis on the displayed page lightness.
+    function computeTargetInk(pageL) {
+        if (current.inkIsLight ? pageL > INK_TO_DARK_ABOVE : pageL < INK_TO_LIGHT_BELOW) current.inkIsLight = !current.inkIsLight;
+        return current.inkIsLight ? INK_LIGHT : INK_DARK;
+    }
+
     function computeMoonBrightHsl(env) {
         if (env.modifiers.moonTint) return env.modifiers.moonTint;
         // Warm white default — slightly warmer for warm sky, cooler for cool sky.
@@ -559,6 +580,8 @@
             current.sky = targetSky.slice();
             current.inner = targetInner.slice();
             current.moonTint = targetMoon.slice();
+            current.inkIsLight = inkForLightness(targetSky[2]) === INK_LIGHT;
+            current.ink = (current.inkIsLight ? INK_LIGHT : INK_DARK).slice();
             current.moonRadiusScale = env.modifiers.moonRadiusScale;
             current.dimming = env.modifiers.dimming;
             current.moonPhase = env.moon.phase;
@@ -577,6 +600,7 @@
                 dPhase < -0.5 ? dPhase + 1 : dPhase
             );
             current.moonPhase = easeScalar(current.moonPhase, targetPhase, dtMs, TAU.moonPhase, speed);
+            current.ink = easeHsl(current.ink, computeTargetInk(current.sky[2]), dtMs, TAU.ink, speed);
         }
 
         // Wobble (golden hour / thunder): a small periodic lightness shift on inner.
@@ -591,6 +615,10 @@
             inner[2] = Math.max(0, Math.min(100, inner[2] + wobble));
             innerHandle.attr('fill', fmtHsl(inner));
         }
+        const ink = fmtHsl(current.ink);
+        for (const ct in clock.handles) clock.handles[ct].attr('stroke', ink);
+        if (clock.centerCircle) clock.centerCircle.attr('stroke', ink).attr('fill', ink);
+        if (moonOutline) moonOutline.attr('stroke', ink).attr('stroke-opacity', 0.5);
         updateMoon(env);
     }
 
@@ -608,7 +636,7 @@
             .attr('fill', 'hsl(225, 28%, 14%)');
         moonBright = moonGroup.append('path');
         moonOutline = moonGroup.append('circle').attr('r', MOON_R)
-            .attr('fill', 'none').attr('stroke', 'rgba(0,0,0,0.35)').attr('stroke-width', 0.7);
+            .attr('fill', 'none').attr('stroke', 'rgba(0,0,0,0.35)').attr('stroke-width', 0.7);   // recoloured with the ink each tick
     }
 
     // Build the illuminated-region path with a proper elliptical terminator.
@@ -831,7 +859,7 @@
         tick,
         snap: () => { firstPaint = true; },   // next tick jumps straight to target colours
         internals: {
-            computeEnvironment, computeTargetSky, computeTargetInner, computeMoonBrightHsl,
+            computeEnvironment, computeTargetSky, computeTargetInner, computeMoonBrightHsl, inkForLightness,
             moonPath, moonPhase, sunPosition, solsticeEquinox, findNextEclipse, eclipsePeak,
             currentLocation, currentWeather, fetchWeather, saveCached,
             cache, STORAGE_KEYS, NEUTRAL_WEATHER, fmtHsl

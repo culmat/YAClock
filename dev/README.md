@@ -64,7 +64,7 @@ dev/clock.html#sim=2026-03-03T11:33&lat=35&lon=-120                 # lunar ecli
 Shift+G renders every entry of `GALLERY_SCENARIOS` in `clock-adaptive-dev.js` (midnight, dawn, rain,
 thunderstorm, snow, golden hour, full moon, solstices, both eclipse kinds, …) side by side with the
 sun altitude, moon illumination and the surprise detectors that fired. Add a scenario there when you
-add a detector in prod. The gallery draws its own static SVG, so it shows target colours without easing.
+add a detector in prod. The gallery draws its own static SVG, so it shows target colours without easing. It uses the same ink rule as prod: strokes are warm near-black on a light page and parchment-light on a dark one (prod adds hysteresis and a 15 s ease so dusk never flickers).
 
 ## How dev attaches to prod
 
