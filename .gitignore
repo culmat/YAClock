@@ -1,2 +1,5 @@
 /.settings/
 /.project
+.playwright-mcp
+.DS_Store
+.mcp.json
