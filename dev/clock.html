@@ -1,0 +1,35 @@
+<!DOCTYPE html>
+<html>
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=yes">
+<title>clock (DEV)</title>
+<script src="https://d3js.org/d3.v6.min.js"></script>
+<script>
+  // DEV ONLY: cache-busting loader so edits show up on a plain reload.
+  (function (t) {
+    document.write('<script src="../clock.js?t=' + t + '"><\/script>');
+    document.write('<script src="../clock-adaptive.js?t=' + t + '"><\/script>');
+    document.write('<script src="clock-adaptive-dev.js?t=' + t + '"><\/script>');
+  })(Date.now());
+</script>
+<style>
+    * { margin: 0; padding: 0; box-sizing: border-box; }
+    html, body { height: 100%; overflow: hidden; display: flex; justify-content: center; align-items: center; }
+    .square { width: 100vmin; height: 100vmin; max-width: 100%; max-height: 100%; }
+    #dev-badge {
+      position: fixed; left: 8px; bottom: 8px; z-index: 9998;
+      font: 11px ui-monospace, Menlo, monospace; color: #eee; background: rgba(20,22,30,0.75);
+      padding: 4px 8px; border-radius: 6px; letter-spacing: 0.3px; pointer-events: none;
+    }
+  </style>
+</head>
+<body style="background-color: #fcd6a1;">
+<div class="square"></div>
+<div id="dev-badge">DEV · Shift+S sim · Shift+G gallery</div>
+<script type="text/javascript">
+    AdaptiveClock.init(".square");
+    AdaptiveClockDev.attach(AdaptiveClock._dev);
+</script>
+</body>
+</html>
