@@ -1,0 +1,51 @@
+<!DOCTYPE html>
+<html>
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=yes">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+<meta name="mobile-web-app-capable" content="yes">
+<title>SuperClock</title>
+<script src="https://d3js.org/d3.v6.min.js"></script>
+<style>
+    * { margin: 0; padding: 0; box-sizing: border-box; }
+    html, body {
+        height: 100%;
+        overflow: hidden;
+        background: #0e1018;
+        display: flex;
+        justify-content: center;
+        align-items: center;
+    }
+    .square {
+        width: 100vmin;
+        height: 100vmin;
+        max-width: 100%;
+        max-height: 100%;
+    }
+</style>
+</head>
+<body>
+<div class="square"></div>
+<script type="module">
+    import { YAClock } from "./src/superclock.js";
+    window.clock = new YAClock("div", {
+        curveTypes: ["curveBasisClosed", "curveNatural"],
+        marks: { SECOND: { attr: { fill: "rgba(255,255,255,0.9)" } } },
+        dials: { SECOND: function(unit, value) {} },     // suppress legacy dial; rely on WebGL dial
+        astronomical: { enabled: true },
+        bloom: { enabled: true, threshold: 0.5, intensity: 1.0 },
+        audio: { hourChime: true, secondTick: false },
+        xr: { enabled: true },
+        theme: {
+            bg: [0.05, 0.06, 0.11],
+            accent: [1.0, 0.78, 0.32],
+            dial: [0.85, 0.88, 1.0],
+            hand: [1.0, 0.95, 0.85],
+            handGlow: 2.4
+        }
+    });
+</script>
+</body>
+</html>

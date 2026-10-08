@@ -1,0 +1,116 @@
+<!DOCTYPE html>
+<html>
+<head>
+<meta charset="UTF-8">
+<title>SuperClock — multi-clock showcase</title>
+<script src="https://d3js.org/d3.v6.min.js"></script>
+<style>
+    body { background: #0e1018; color: #aab; font-family: system-ui; margin: 0; }
+    table { width: 100vw; height: 100vh; border-collapse: collapse; }
+    td { border: 1px solid #222; padding: 0; }
+</style>
+</head>
+<body>
+<table>
+    <tr>
+        <td><div id="clockDiv"></div></td>
+        <td><div id="clockDiv2"></div></td>
+    </tr>
+    <tr>
+        <td><div id="clockDiv3"></div></td>
+        <td><div id="clockDiv4"></div></td>
+    </tr>
+</table>
+<script type="module">
+    import { YAClock } from "./src/superclock.js";
+
+    // 1. Minimalist: defaults
+    new YAClock("#clockDiv", {});
+
+    // 2. Custom dial circles + onSetTime expanding ring (legacy compat path)
+    let marks = [];
+    const offsets = { HOUR: 10, MINUTE: 70, SECOND: 130 };
+    new YAClock("#clockDiv2", {
+        circleRadii: { HOUR: offsets.HOUR, MINUTE: offsets.MINUTE, SECOND: offsets.SECOND },
+        onSetTime: function () {
+            this.options.circleRadii.HOUR = offsets.HOUR + (this.now.getHours() % this.units.HOUR) * 5;
+            this.options.circleRadii.MINUTE = offsets.MINUTE + this.now.getMinutes();
+            this.options.circleRadii.SECOND = offsets.SECOND + this.now.getSeconds();
+            for (let i = 0; i < marks.length; i++) {
+                const p = this.cPoint(60, i, this.options.circleRadii.SECOND, this.center);
+                this.transition(marks[i]).attr("cx", p[0]).attr("cy", p[1]);
+            }
+        },
+        background: function () {
+            for (const radius of [10, 70, 130, 190]) {
+                this.svg.append("circle")
+                    .attr("cx", this.center[0]).attr("cy", this.center[1])
+                    .attr("fill", "none").attr("stroke", "#445").attr("r", radius);
+            }
+        },
+        marks: {
+            SECOND: { attr: { fill: "rgba(150,160,200,0.8)", r: 2 } },
+            MINUTE: { attr: { fill: "rgba(220,220,255,0.9)", r: 3 } },
+            HOUR:   { attr: { fill: "rgba(220,220,255,0.9)", r: 4 } }
+        },
+        dials: {
+            SECOND: function (unit, value) {
+                const c = this.cPoint(this.units[unit], value, this.options.circleRadii[unit], this.center);
+                marks.push(this.svg.append("circle")
+                    .attr("cx", c[0]).attr("cy", c[1])
+                    .attr("fill", value % 5 === 0 ? "#aab" : "#778")
+                    .attr("r", value % 5 === 0 ? 3 : 2));
+            }
+        },
+        bloom: { enabled: true, threshold: 0.7, intensity: 0.5 },
+        theme: {
+            bg: [0.04, 0.05, 0.09], accent: [0.7, 0.8, 1.0],
+            dial: [0.6, 0.7, 1.0], hand: [0.9, 0.95, 1.0], handGlow: 1.6
+        }
+    });
+
+    // 3. Two stacked curves
+    new YAClock("#clockDiv3", {
+        curveTypes: ["curveBasisClosed", "curveNatural"],
+        marks: { SECOND: { attr: { fill: "white" } } },
+        dials: { SECOND: function () {} },
+        bloom: { enabled: true, threshold: 0.55, intensity: 1.1 },
+        theme: {
+            bg: [0.07, 0.05, 0.10], accent: [1.0, 0.6, 0.7],
+            dial: [1.0, 1.0, 1.0], hand: [1.0, 0.8, 0.85], handGlow: 2.0
+        }
+    });
+
+    // 4. No curve handle, custom mark ring around the dial (legacy clockDiv4 compat)
+    new YAClock("#clockDiv4", {
+        curveTypes: [],
+        marks: {
+            SECOND: { attr: { r: 8 } },
+            MINUTE: { attr: { fill: "red", r: 3 } },
+            HOUR:   { attr: { fill: "red", r: 4 } }
+        },
+        onSetTime: function () {
+            if (!this.myMarks) return;
+            const mark = this.myMarks[this.now.getSeconds()];
+            this.transition(mark).attr("fill", "#f44").attr("r", 5);
+            const prev = this.myMarks[(this.now.getSeconds() + 59) % 60];
+            this.transition(prev).attr("fill", "#445").attr("r", 2);
+        },
+        dials: {
+            SECOND: function (unit, value) {
+                if (!this.myMarks) this.myMarks = [];
+                const c = this.cPoint(this.units[unit], value, this.options.circleRadii[unit], this.center);
+                this.myMarks.push(this.svg.append("circle")
+                    .attr("cx", c[0]).attr("cy", c[1])
+                    .attr("fill", "#445").attr("r", 2));
+            }
+        },
+        bloom: { enabled: true, threshold: 0.6, intensity: 1.4 },
+        theme: {
+            bg: [0.10, 0.05, 0.05], accent: [1.0, 0.4, 0.4],
+            dial: [1.0, 0.8, 0.8], hand: [1.0, 0.6, 0.6], handGlow: 2.4
+        }
+    });
+</script>
+</body>
+</html>
