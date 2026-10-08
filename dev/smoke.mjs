@@ -109,6 +109,28 @@ async function openPage(url) {
   const dt1 = await page.inputValue('#sim-dt'); await page.waitForTimeout(1600);
   const dt2 = await page.inputValue('#sim-dt');
   check('dev: time field follows the clock at 1 h/s', dt1 !== dt2, `${dt1} -> ${dt2}`);
+  const lapse = await page.evaluate(() => AdaptiveClock._dev.getClock().options.transitionDuration);
+  check('dev: time-lapse drives hands without transitions', lapse === 0, String(lapse));
+  await page.selectOption('#sim-speed', '1');
+  const real = await page.evaluate(() => AdaptiveClock._dev.getClock().options.transitionDuration);
+  check('dev: real time restores hand transitions', real === 1000, String(real));
+  // step button nudges sim time by exactly one day
+  const t0 = await page.evaluate(() => AdaptiveClock._dev.getNow().simTime.getTime());
+  await page.click('button[data-step="86400"]'); await page.waitForTimeout(200);
+  const t1 = await page.evaluate(() => AdaptiveClock._dev.getNow().simTime.getTime());
+  check('dev: +1 d step', Math.abs((t1 - t0) - 86400000) < 2000, String(t1 - t0));
+  // "real weather" drops the override and the controls follow the live weather again
+  await page.click('#sim-wx-clear'); await page.waitForTimeout(700);
+  const wxSync = await page.evaluate(() => ({
+    override: !!AdaptiveClockDev.sim.weatherOverride,
+    live: AdaptiveClock._dev.internals.currentWeather().code,
+    ui: Number(document.querySelector('#sim-code').value)
+  }));
+  check('dev: real weather resets controls to live values', !wxSync.override && wxSync.ui === wxSync.live, JSON.stringify(wxSync));
+  // "prod location" drops the override; status says so
+  await page.click('#sim-loc-clear'); await page.waitForTimeout(700);
+  const locSt = await page.evaluate(() => ({ ov: !!AdaptiveClockDev.sim.locationOverride, txt: document.querySelector('#sim-loc-status').textContent }));
+  check('dev: prod location drops the override', !locSt.ov && /^prod location:/.test(locSt.txt), locSt.txt);
   // smart place input (DMS with hemispheres)
   await page.fill('#sim-place', "64°09'N 21°56'W"); await page.press('#sim-place', 'Enter'); await page.waitForTimeout(300);
   const locDms = await page.evaluate(() => AdaptiveClock._dev.internals.currentLocation());

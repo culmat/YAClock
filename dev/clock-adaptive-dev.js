@@ -12,9 +12,10 @@
     let hooks = null;           // AdaptiveClock._dev
     let simOverlay = null;
     let galleryOverlay = null;
+    let restartTicker = null;   // installed by attach(): drives the hands at a speed-appropriate cadence
 
     // PROD internals, assigned in attach() from hooks.internals (pure functions + caches).
-    let cache, saveCached, STORAGE_KEYS, fetchWeather, currentLocation, currentWeather, NEUTRAL_WEATHER,
+    let currentLocation, currentWeather, NEUTRAL_WEATHER,
         computeEnvironment, computeTargetSky, computeTargetInner, computeMoonBrightHsl, fmtHsl,
         moonPath, moonPhase, sunPosition, solsticeEquinox, findNextEclipse, eclipsePeak;
 
@@ -54,8 +55,7 @@
             weather:  sim.enabled ? sim.weatherOverride  : null
         });
         if (sim.enabled && sim.snap) hooks.snap();
-        const clock = hooks.getClock();
-        if (clock) clock.setTime(getNow().simTime);   // re-point hands; fires onSetTime → PROD tick()
+        if (restartTicker) restartTicker();           // re-point hands now; fires onSetTime → PROD tick()
     }
 
     function setSim(opts) {
@@ -206,6 +206,10 @@
 <div class="row"><label>time</label><div style="display:flex;gap:4px">
   <input type="datetime-local" id="sim-dt" style="${field};flex:1;min-width:0">
   <button id="sim-now" style="${btn}" title="back to wall-clock time">now</button></div></div>
+<div class="row"><label>step</label><div style="display:flex;gap:4px;flex-wrap:wrap">
+  <button data-step="-86400" style="${btn}">−1 d</button><button data-step="-3600" style="${btn}">−1 h</button>
+  <button data-step="3600" style="${btn}">+1 h</button><button data-step="86400" style="${btn}">+1 d</button>
+  <button data-step="604800" style="${btn}">+7 d</button></div></div>
 <div class="row"><label>speed</label><select id="sim-speed" style="${field}"></select></div>
 <div class="row"><label>mode</label><div>
   <label><input type="radio" name="sim-mode" value="snap" id="sim-mode-snap"> snap</label>
@@ -222,8 +226,8 @@
   <button id="sim-place-go" style="${btn}">go</button></div></div>
 <div class="row"><label></label><div style="display:flex;gap:4px;flex-wrap:wrap">
   <select id="sim-preset" style="${field}"><option value="">presets…</option></select>
-  <button id="sim-geo" style="${btn}">use my location</button>
-  <button id="sim-loc-clear" style="${btn}" title="drop the override, back to IP location">real place</button></div></div>
+  <button id="sim-loc-clear" style="${btn}" title="drop the override: the IP-based location PROD itself uses">prod location</button>
+  <button id="sim-geo" style="${btn}" title="browser geolocation as a sim override (PROD never asks for it)">browser GPS</button></div></div>
 <div class="row"><label></label><div class="hint" id="sim-loc-status"></div></div>
 <hr>
 <div class="row"><label>jump</label><div style="display:flex;flex-wrap:wrap;gap:4px">
@@ -253,6 +257,10 @@
             if (isFinite(dv.getTime())) setSim({ enabled: true, simTime: dv });
         });
         $('sim-now').addEventListener('click', () => { setSim({ enabled: true, simTime: new Date() }); refresh(); });
+        root.querySelectorAll('button[data-step]').forEach(b => b.addEventListener('click', () => {
+            setSim({ enabled: true, simTime: new Date(getNow().simTime.getTime() + Number(b.dataset.step) * 1000) });
+            refresh();
+        }));
         speed.addEventListener('change', () => setSim({ enabled: true, speed: parseFloat(speed.value) }));
         function syncMode() {
             modeHint.textContent = sim.snap
@@ -269,7 +277,14 @@
         code.addEventListener('change', onWx);
         cloud.addEventListener('input', onWx);
         precip.addEventListener('input', onWx);
-        $('sim-wx-clear').addEventListener('click', () => setSim({ weatherOverride: null }));
+        $('sim-wx-clear').addEventListener('click', () => { setSim({ weatherOverride: null }); syncWeatherInputs(); });
+        function syncWeatherInputs() {
+            const w = currentWeather();
+            if (![...code.options].some(o => o.value === String(w.code))) code.add(new Option(String(w.code), String(w.code)));
+            code.value = String(w.code);
+            cloud.value = Math.round((w.cloudCover || 0) * 100);
+            precip.value = w.precip || 0;
+        }
 
         // --- place
         async function applyPlace(q) {
@@ -297,15 +312,8 @@
             if (!navigator.geolocation) { locStatus.textContent = 'geolocation unsupported'; return; }
             locStatus.textContent = 'requesting…';
             navigator.geolocation.getCurrentPosition(
-                (pos) => {
-                    const loc = { lat: pos.coords.latitude, lon: pos.coords.longitude,
-                        tz: cache.location && cache.location.tz, source: 'browser-geo', fetchedAt: Date.now() };
-                    cache.location = loc;
-                    saveCached(STORAGE_KEYS.location, loc);
-                    cache.weather = null;
-                    fetchWeather();
-                    setSim({ locationOverride: null });
-                },
+                (pos) => setSim({ enabled: true, locationOverride: {
+                    lat: pos.coords.latitude, lon: pos.coords.longitude, source: 'override', label: 'browser GPS' } }),
                 (err) => { locStatus.textContent = 'denied/failed (' + err.code + ')'; },
                 { timeout: 10000, maximumAge: 60000, enableHighAccuracy: false }
             );
@@ -322,17 +330,14 @@
         dt.value = fmtDt(getNow().simTime);
         if (![...speed.options].some(o => o.value === String(sim.speed))) speed.add(new Option(sim.speed + '×', String(sim.speed)));
         speed.value = String(sim.speed);
-        const wx = currentWeather();
-        if (![...code.options].some(o => o.value === String(wx.code))) code.add(new Option(String(wx.code), String(wx.code)));
-        code.value = String(wx.code);
-        cloud.value = Math.round((wx.cloudCover || 0) * 100);
-        precip.value = wx.precip || 0;
+        syncWeatherInputs();
         syncMode();
 
         // --- live readout: time follows the clock, state line shows what PROD computes right now
         function refresh() {
             if (root.style.display === 'none') return;
             if (document.activeElement !== dt) dt.value = fmtDt(getNow().simTime);
+            if (!(sim.enabled && sim.weatherOverride) && ![code, cloud, precip].includes(document.activeElement)) syncWeatherInputs();
             cloudV.textContent = cloud.value + '%';
             precipV.textContent = (+precip.value).toFixed(1) + ' mm/h';
             const now = getNow(), loc = currentLocation(), w = currentWeather();
@@ -341,7 +346,7 @@
             const coords = lo && (lo.lat.toFixed(3) + ', ' + lo.lon.toFixed(3));
             locStatus.textContent = lo
                 ? 'override: ' + (lo.label && lo.label !== coords ? lo.label + ' (' + coords + ')' : coords)
-                : 'real: ' + loc.lat.toFixed(3) + ', ' + loc.lon.toFixed(3) + ' via ' + (loc.source || 'cache');
+                : 'prod location: ' + loc.lat.toFixed(3) + ', ' + loc.lon.toFixed(3) + ' (' + (loc.source || 'cache') + ')';
             state.textContent =
                 'sun ' + env.sun.altitudeDeg.toFixed(1) + '° ' + (env.sun.isUp ? 'up' : 'down')
                 + ' · moon ' + (env.moon.illumination * 100).toFixed(0) + '% ' + (env.moon.waxing ? 'waxing' : 'waning')
@@ -638,18 +643,30 @@
 
     function attach(devHooks) {
         hooks = devHooks;
-        ({ cache, saveCached, STORAGE_KEYS, fetchWeather, currentLocation, currentWeather, NEUTRAL_WEATHER,
+        ({ currentLocation, currentWeather, NEUTRAL_WEATHER,
            computeEnvironment, computeTargetSky, computeTargetInner, computeMoonBrightHsl, fmtHsl,
            moonPath, moonPhase, sunPosition, solsticeEquinox, findNextEclipse, eclipsePeak } = hooks.internals);
 
         parseHash();
         window.addEventListener('hashchange', () => { parseHash(); pushToProd(); });
 
-        // Drive the YAClock hands from sim time: swap its tick and restart the interval.
+        // Drive the YAClock hands from sim time. At real time (or paused) YAClock's own cadence is
+        // right: one tick per second, each move animated over a second. In time-lapse (speed > 1)
+        // that would start a fresh animation every second — headache. Tick at 4 Hz with no
+        // transitions instead, so hands and colours flow like a time-lapse video.
         const clock = hooks.getClock();
+        const realTransition = clock.options.transitionDuration;
+        let timer = null;
         clock.stop();
-        clock.tick = function () { this.setTime(getNow().simTime); };
-        clock.start();
+        clock.start = function () {                 // YAClock calls start() when the tab becomes visible again
+            if (timer) clearInterval(timer);
+            const lapse = sim.enabled && sim.speed > 1;
+            clock.options.transitionDuration = lapse ? 0 : realTransition;
+            clock.setTime(getNow().simTime);
+            timer = setInterval(() => clock.setTime(getNow().simTime), lapse ? 250 : 1000);
+        };
+        clock.stop = function () { if (timer) { clearInterval(timer); timer = null; } };
+        restartTicker = clock.start;
 
         pushToProd();
         if (sim.enabled) buildSimOverlay();
