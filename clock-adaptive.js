@@ -532,6 +532,10 @@
         const tint = weatherTint(w.code);
         const strength = weatherStrength(w.code, w.cloudCover);
         let out = lerpHsl(base, tint, strength);
+        // Precipitation darkens and desaturates the sky window a little (saturates at ~5 mm/h).
+        const rain = Math.min(1, (w.precip || 0) / 5);
+        out[1] = out[1] * (1 - 0.25 * rain);
+        out[2] = out[2] - 10 * rain;
         out[0] = (out[0] + env.modifiers.innerHueShift + 360) % 360;
         out[1] = Math.max(0, Math.min(100, out[1] * (1 + env.modifiers.innerSatBoost)));
         out[2] = Math.max(0, Math.min(100, out[2] + env.modifiers.innerLightBoost * 100));
@@ -825,6 +829,7 @@
         getClock: () => clock,
         getNow,
         tick,
+        snap: () => { firstPaint = true; },   // next tick jumps straight to target colours
         internals: {
             computeEnvironment, computeTargetSky, computeTargetInner, computeMoonBrightHsl,
             moonPath, moonPhase, sunPosition, solsticeEquinox, findNextEclipse, eclipsePeak,

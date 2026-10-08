@@ -28,7 +28,8 @@
         anchorSim: Date.now(),
         speed: 1,
         weatherOverride: null,
-        locationOverride: null
+        locationOverride: null,
+        snap: true           // true: jump to final colours on every change; false: ease in like PROD
     };
 
     function getNow() {
@@ -52,6 +53,7 @@
             location: sim.enabled ? sim.locationOverride : null,
             weather:  sim.enabled ? sim.weatherOverride  : null
         });
+        if (sim.enabled && sim.snap) hooks.snap();
         const clock = hooks.getClock();
         if (clock) clock.setTime(getNow().simTime);   // re-point hands; fires onSetTime → PROD tick()
     }
@@ -93,7 +95,8 @@
             if (!isFinite(sim.anchorSim)) sim.anchorSim = Date.now();
             sim.anchorReal = Date.now();
         }
-        if (params.speed) sim.speed = parseFloat(params.speed) || 1;
+        if (params.speed) sim.speed = parseFloat(params.speed) || 0;
+        if (params.ease) sim.snap = false;
         if (params.lat && params.lon) {
             sim.locationOverride = { lat: parseFloat(params.lat), lon: parseFloat(params.lon), source: 'override' };
         }
@@ -115,6 +118,7 @@
         const parts = [];
         parts.push('sim=' + encodeURIComponent(new Date(getNow().simTime).toISOString().slice(0, 16)));
         parts.push('speed=' + sim.speed);
+        if (!sim.snap) parts.push('ease=1');
         if (sim.locationOverride) {
             parts.push('lat=' + sim.locationOverride.lat);
             parts.push('lon=' + sim.locationOverride.lon);
@@ -130,128 +134,224 @@
     // SIM OVERLAY
     // ============================================================
 
+    const SPEEDS = [
+        { v: 0,      label: 'paused' },
+        { v: 1,      label: 'real time' },
+        { v: 60,     label: '1 min / s' },
+        { v: 3600,   label: '1 hour / s' },
+        { v: 86400,  label: '1 day / s' },
+        { v: 604800, label: '1 week / s' }
+    ];
+    const WMO_CODES = [
+        [0, '0 clear'], [1, '1 mainly clear'], [2, '2 partly cloudy'], [3, '3 overcast'], [45, '45 fog'],
+        [51, '51 drizzle'], [61, '61 rain'], [63, '63 moderate rain'], [65, '65 heavy rain'],
+        [71, '71 snow'], [73, '73 moderate snow'], [80, '80 showers'], [95, '95 thunderstorm']
+    ];
+    const PLACES = [
+        ['Basel', 47.56, 7.59], ['Reykjavík', 64.15, -21.94], ['Tromsø', 69.65, 18.96],
+        ['Longyearbyen', 78.22, 15.63], ['Quito', -0.18, -78.47], ['Honolulu', 21.31, -157.86],
+        ['Sydney', -33.87, 151.21], ['Ushuaia', -54.80, -68.30]
+    ];
+
+    // Accepts "47.56, 7.59" · "47.56 7.59" · "47.56N 7.59E" · "7.59E 47.56N" · 64°09'N 21°56'W · 47°33'36"N 7°35'19"E
+    function parseLatLon(str) {
+        const re = /(-?\d+(?:\.\d+)?)\s*(?:°|º|deg)?\s*(?:(\d+(?:\.\d+)?)\s*['′])?\s*(?:(\d+(?:\.\d+)?)\s*["″])?\s*([NSEW])?/gi;
+        const parts = [];
+        let m;
+        while (parts.length < 2 && (m = re.exec(str))) {
+            let v = parseFloat(m[1]) + (m[2] ? parseFloat(m[2]) / 60 : 0) + (m[3] ? parseFloat(m[3]) / 3600 : 0);
+            const h = (m[4] || '').toUpperCase();
+            if (h === 'S' || h === 'W') v = -Math.abs(v);
+            parts.push({ v, h });
+        }
+        if (parts.length !== 2) return null;
+        let [a, b] = parts;
+        if (a.h === 'E' || a.h === 'W' || b.h === 'N' || b.h === 'S') [a, b] = [b, a];
+        if (!isFinite(a.v) || !isFinite(b.v) || Math.abs(a.v) > 90 || Math.abs(b.v) > 180) return null;
+        return { lat: a.v, lon: b.v };
+    }
+
+    async function geocode(q) {
+        const r = await fetch('https://geocoding-api.open-meteo.com/v1/search?name=' + encodeURIComponent(q) + '&count=1&language=en');
+        if (!r.ok) return null;
+        const j = await r.json();
+        const hit = j.results && j.results[0];
+        return hit ? { lat: hit.latitude, lon: hit.longitude, label: hit.name + (hit.country_code ? ', ' + hit.country_code : '') } : null;
+    }
+
+    function fmtDt(d) {
+        const pad = (n) => ('0' + n).slice(-2);
+        return d.getFullYear() + '-' + pad(d.getMonth() + 1) + '-' + pad(d.getDate()) + 'T' + pad(d.getHours()) + ':' + pad(d.getMinutes());
+    }
+
     function buildSimOverlay() {
         if (simOverlay) { simOverlay.style.display = 'block'; return; }
         const root = document.createElement('div');
-        root.style.cssText = 'position:fixed;top:8px;right:8px;z-index:9999;background:rgba(20,22,30,0.86);'
-            + 'color:#eee;font:12px/1.4 ui-monospace,Menlo,monospace;padding:10px 12px;border-radius:8px;'
-            + 'box-shadow:0 4px 14px rgba(0,0,0,0.4);min-width:230px;backdrop-filter:blur(6px);';
-        root.innerHTML =
-            '<div style="font-weight:700;margin-bottom:6px;letter-spacing:0.5px">SIM</div>'
-          + '<div><input type="datetime-local" id="sim-dt" style="width:100%;background:#2a2d3a;color:#eee;border:1px solid #444;padding:3px;border-radius:3px"></div>'
-          + '<div style="margin-top:6px"><label>speed </label>'
-          + '<select id="sim-speed" style="background:#2a2d3a;color:#eee;border:1px solid #444">'
-          + '<option value="0">pause</option><option value="1">1×</option><option value="60">60×</option>'
-          + '<option value="3600">3600×</option><option value="86400">86400×</option></select></div>'
-          + '<div style="margin-top:6px"><label>cloud </label><input id="sim-cloud" type="range" min="0" max="100" value="30" style="width:120px"></div>'
-          + '<div><label>precip </label><input id="sim-precip" type="range" min="0" max="10" step="0.1" value="0" style="width:120px"></div>'
-          + '<div><label>code </label><select id="sim-code" style="background:#2a2d3a;color:#eee;border:1px solid #444">'
-          + '<option value="0">0 clear</option><option value="2">2 partly</option><option value="3">3 overcast</option>'
-          + '<option value="45">45 fog</option><option value="61">61 rain</option><option value="71">71 snow</option>'
-          + '<option value="95">95 thunder</option></select></div>'
-          + '<div style="margin-top:6px"><label>lat </label><input id="sim-lat" type="number" step="0.01" style="width:65px;background:#2a2d3a;color:#eee;border:1px solid #444">'
-          + ' <label>lon </label><input id="sim-lon" type="number" step="0.01" style="width:65px;background:#2a2d3a;color:#eee;border:1px solid #444"></div>'
-          + '<div style="margin-top:6px;display:flex;align-items:center;gap:6px">'
-          + '<button id="sim-geo">use my location</button>'
-          + '<span id="sim-geo-status" style="font-size:10px;opacity:0.7"></span></div>'
-          + '<div style="margin-top:8px;display:flex;flex-wrap:wrap;gap:4px">'
-          + '<button data-jump="sunrise">↑sun</button><button data-jump="sunset">↓sun</button>'
-          + '<button data-jump="full">●moon</button><button data-jump="new">○moon</button>'
-          + '<button data-jump="solstice">solst</button><button data-jump="equinox">equi</button>'
-          + '<button data-jump="solar">☼ecl</button><button data-jump="lunar">☾ecl</button></div>'
-          + '<div style="margin-top:6px;font-size:10px;opacity:0.6">Shift+S to toggle</div>';
+        root.id = 'yaclock-sim';
+        root.style.cssText = 'position:fixed;top:8px;right:8px;z-index:9999;background:rgba(20,22,30,0.9);'
+            + 'color:#eee;font:12px/1.5 ui-monospace,Menlo,monospace;padding:10px 12px;border-radius:8px;'
+            + 'box-shadow:0 4px 14px rgba(0,0,0,0.4);width:340px;backdrop-filter:blur(6px);';
+        const field = 'background:#2a2d3a;color:#eee;border:1px solid #444;border-radius:3px;padding:2px 4px;font:inherit';
+        const btn = 'background:#2a2d3a;color:#eee;border:1px solid #444;padding:2px 6px;border-radius:3px;font:11px ui-monospace,Menlo,monospace;cursor:pointer';
+        root.innerHTML = `
+<style>
+  #yaclock-sim .row { display:grid; grid-template-columns:52px 1fr; gap:4px 8px; align-items:center; margin-top:5px }
+  #yaclock-sim .row > label:first-child { opacity:.65 }
+  #yaclock-sim .hint { font-size:10px; opacity:.55; line-height:1.4 }
+  #yaclock-sim input[type=range] { width:110px; vertical-align:middle }
+  #yaclock-sim hr { border:0; border-top:1px solid #3a3e4c; margin:8px 0 }
+  #yaclock-sim #sim-state { font-size:11px; opacity:.9; white-space:pre-line; color:#ffd9a8 }
+</style>
+<div style="font-weight:700;letter-spacing:.5px">SIM</div>
+<div class="row"><label>time</label><div style="display:flex;gap:4px">
+  <input type="datetime-local" id="sim-dt" style="${field};flex:1;min-width:0">
+  <button id="sim-now" style="${btn}" title="back to wall-clock time">now</button></div></div>
+<div class="row"><label>speed</label><select id="sim-speed" style="${field}"></select></div>
+<div class="row"><label>mode</label><div>
+  <label><input type="radio" name="sim-mode" value="snap" id="sim-mode-snap"> snap</label>
+  <label style="margin-left:10px"><input type="radio" name="sim-mode" value="ease" id="sim-mode-ease"> ease</label>
+  <div class="hint" id="sim-mode-hint"></div></div></div>
+<hr>
+<div class="row"><label>weather</label><select id="sim-code" style="${field}"></select></div>
+<div class="row"><label>cloud</label><div><input id="sim-cloud" type="range" min="0" max="100" value="30"> <span id="sim-cloud-v"></span></div></div>
+<div class="row"><label>precip</label><div><input id="sim-precip" type="range" min="0" max="10" step="0.1" value="0"> <span id="sim-precip-v"></span></div></div>
+<div class="row"><label></label><button id="sim-wx-clear" style="${btn};justify-self:start" title="drop the override, back to live weather">real weather</button></div>
+<hr>
+<div class="row"><label>place</label><div style="display:flex;gap:4px">
+  <input id="sim-place" placeholder="Basel · 47.56, 7.59 · 64°09'N 21°56'W" style="${field};flex:1;min-width:0">
+  <button id="sim-place-go" style="${btn}">go</button></div></div>
+<div class="row"><label></label><div style="display:flex;gap:4px;flex-wrap:wrap">
+  <select id="sim-preset" style="${field}"><option value="">presets…</option></select>
+  <button id="sim-geo" style="${btn}">use my location</button>
+  <button id="sim-loc-clear" style="${btn}" title="drop the override, back to IP location">real place</button></div></div>
+<div class="row"><label></label><div class="hint" id="sim-loc-status"></div></div>
+<hr>
+<div class="row"><label>jump</label><div style="display:flex;flex-wrap:wrap;gap:4px">
+  <button data-jump="sunrise" style="${btn}">↑sun</button><button data-jump="sunset" style="${btn}">↓sun</button>
+  <button data-jump="full" style="${btn}">●moon</button><button data-jump="new" style="${btn}">○moon</button>
+  <button data-jump="solstice" style="${btn}">solst</button><button data-jump="equinox" style="${btn}">equi</button>
+  <button data-jump="solar" style="${btn}">☼ecl</button><button data-jump="lunar" style="${btn}">☾ecl</button></div></div>
+<hr>
+<div id="sim-state"></div>
+<div class="hint" style="margin-top:4px">Shift+S toggle · Shift+G gallery · everything above lives in the URL hash</div>`;
         document.body.appendChild(root);
         simOverlay = root;
 
-        root.querySelectorAll('button[data-jump]').forEach(b => b.style.cssText =
-            'background:#2a2d3a;color:#eee;border:1px solid #444;padding:2px 6px;border-radius:3px;font:11px ui-monospace,Menlo,monospace;cursor:pointer');
+        const $ = (id) => root.querySelector('#' + id);
+        const dt = $('sim-dt'), speed = $('sim-speed'), code = $('sim-code'), cloud = $('sim-cloud'), precip = $('sim-precip');
+        const cloudV = $('sim-cloud-v'), precipV = $('sim-precip-v');
+        const place = $('sim-place'), preset = $('sim-preset'), locStatus = $('sim-loc-status'), state = $('sim-state');
+        const modeSnap = $('sim-mode-snap'), modeEase = $('sim-mode-ease'), modeHint = $('sim-mode-hint');
 
-        const dt = root.querySelector('#sim-dt');
-        const speed = root.querySelector('#sim-speed');
-        const cloud = root.querySelector('#sim-cloud');
-        const precip = root.querySelector('#sim-precip');
-        const code = root.querySelector('#sim-code');
-        const lat = root.querySelector('#sim-lat');
-        const lon = root.querySelector('#sim-lon');
+        SPEEDS.forEach(s => speed.add(new Option(s.label, String(s.v))));
+        WMO_CODES.forEach(([v, l]) => code.add(new Option(l, String(v))));
+        PLACES.forEach(([name, lat, lon]) => preset.add(new Option(name, lat + ',' + lon)));
 
-        function fmtDt(d) {
-            const pad = (n) => ('0'+n).slice(-2);
-            return d.getFullYear()+'-'+pad(d.getMonth()+1)+'-'+pad(d.getDate())+'T'+pad(d.getHours())+':'+pad(d.getMinutes());
-        }
-
-        function syncFromUI() {
-            sim.enabled = true;
+        // --- time / speed / mode
+        dt.addEventListener('change', () => {
             const dv = new Date(dt.value);
-            if (!isFinite(dv.getTime())) return;
-            const sv = parseFloat(speed.value);
-            setSim({
-                simTime: dv,
-                speed: sv,
-                weatherOverride: {
-                    cloudCover: +cloud.value / 100,
-                    precip: +precip.value,
-                    code: +code.value
-                },
-                locationOverride: (lat.value && lon.value) ? { lat: +lat.value, lon: +lon.value, source: 'override' } : null
-            });
-        }
-
-        dt.addEventListener('change', syncFromUI);
-        speed.addEventListener('change', syncFromUI);
-        cloud.addEventListener('input', syncFromUI);
-        precip.addEventListener('input', syncFromUI);
-        code.addEventListener('change', syncFromUI);
-        lat.addEventListener('change', syncFromUI);
-        lon.addEventListener('change', syncFromUI);
-
-        root.querySelectorAll('button[data-jump]').forEach(btn => {
-            btn.addEventListener('click', () => {
-                const target = jumpTo(btn.dataset.jump);
-                if (target) {
-                    dt.value = fmtDt(target);
-                    syncFromUI();
-                }
-            });
+            if (isFinite(dv.getTime())) setSim({ enabled: true, simTime: dv });
         });
+        $('sim-now').addEventListener('click', () => { setSim({ enabled: true, simTime: new Date() }); refresh(); });
+        speed.addEventListener('change', () => setSim({ enabled: true, speed: parseFloat(speed.value) }));
+        function syncMode() {
+            modeHint.textContent = sim.snap
+                ? 'snap: jump straight to the final colours (what the gallery shows)'
+                : 'ease: colours drift in over minutes, like PROD (÷ speed)';
+            modeSnap.checked = sim.snap; modeEase.checked = !sim.snap;
+        }
+        modeSnap.addEventListener('change', () => { sim.snap = true; syncMode(); setSim({ enabled: true }); });
+        modeEase.addEventListener('change', () => { sim.snap = false; syncMode(); setSim({ enabled: true }); });
 
-        const geoBtn = root.querySelector('#sim-geo');
-        const geoStatus = root.querySelector('#sim-geo-status');
-        geoBtn.style.cssText = 'background:#2a2d3a;color:#eee;border:1px solid #444;padding:2px 6px;border-radius:3px;font:11px ui-monospace,Menlo,monospace;cursor:pointer';
-        geoBtn.addEventListener('click', () => {
-            if (!navigator.geolocation) { geoStatus.textContent = 'unsupported'; return; }
-            geoStatus.textContent = 'requesting…';
+        // --- weather
+        const weatherFromUI = () => ({ code: +code.value, cloudCover: +cloud.value / 100, precip: +precip.value });
+        const onWx = () => setSim({ enabled: true, weatherOverride: weatherFromUI() });
+        code.addEventListener('change', onWx);
+        cloud.addEventListener('input', onWx);
+        precip.addEventListener('input', onWx);
+        $('sim-wx-clear').addEventListener('click', () => setSim({ weatherOverride: null }));
+
+        // --- place
+        async function applyPlace(q) {
+            q = q.trim();
+            if (!q) return;
+            const parsed = parseLatLon(q);
+            let loc = parsed ? { lat: parsed.lat, lon: parsed.lon, label: parsed.lat.toFixed(3) + ', ' + parsed.lon.toFixed(3) } : null;
+            if (!loc) {
+                locStatus.textContent = 'looking up "' + q + '"…';
+                try { loc = await geocode(q); } catch (e) { loc = null; }
+            }
+            if (!loc) { locStatus.textContent = 'could not parse or find "' + q + '"'; return; }
+            setSim({ enabled: true, locationOverride: { lat: loc.lat, lon: loc.lon, source: 'override', label: loc.label } });
+        }
+        $('sim-place-go').addEventListener('click', () => applyPlace(place.value));
+        place.addEventListener('keydown', (e) => { if (e.key === 'Enter') applyPlace(place.value); });
+        preset.addEventListener('change', () => {
+            if (!preset.value) return;
+            const [lat, lon] = preset.value.split(',').map(Number);
+            setSim({ enabled: true, locationOverride: { lat, lon, source: 'override', label: preset.options[preset.selectedIndex].text } });
+            preset.value = '';
+        });
+        $('sim-loc-clear').addEventListener('click', () => setSim({ locationOverride: null }));
+        $('sim-geo').addEventListener('click', () => {
+            if (!navigator.geolocation) { locStatus.textContent = 'geolocation unsupported'; return; }
+            locStatus.textContent = 'requesting…';
             navigator.geolocation.getCurrentPosition(
                 (pos) => {
-                    const loc = {
-                        lat: pos.coords.latitude,
-                        lon: pos.coords.longitude,
-                        tz: cache.location && cache.location.tz,
-                        source: 'browser-geo',
-                        fetchedAt: Date.now()
-                    };
+                    const loc = { lat: pos.coords.latitude, lon: pos.coords.longitude,
+                        tz: cache.location && cache.location.tz, source: 'browser-geo', fetchedAt: Date.now() };
                     cache.location = loc;
                     saveCached(STORAGE_KEYS.location, loc);
                     cache.weather = null;
                     fetchWeather();
-                    geoStatus.textContent = loc.lat.toFixed(3) + ', ' + loc.lon.toFixed(3);
+                    setSim({ locationOverride: null });
                 },
-                (err) => { geoStatus.textContent = 'denied/failed (' + err.code + ')'; },
+                (err) => { locStatus.textContent = 'denied/failed (' + err.code + ')'; },
                 { timeout: 10000, maximumAge: 60000, enableHighAccuracy: false }
             );
         });
 
-        // Initial sync from sim state
+        // --- jumps
+        root.querySelectorAll('button[data-jump]').forEach(b => b.addEventListener('click', () => {
+            const target = jumpTo(b.dataset.jump);
+            if (target) { setSim({ enabled: true, simTime: target }); refresh(); }
+            else locStatus.textContent = 'no ' + b.dataset.jump + ' found ahead';
+        }));
+
+        // --- initial values from sim state / live data
         dt.value = fmtDt(getNow().simTime);
+        if (![...speed.options].some(o => o.value === String(sim.speed))) speed.add(new Option(sim.speed + '×', String(sim.speed)));
         speed.value = String(sim.speed);
-        if (sim.weatherOverride) {
-            if (sim.weatherOverride.cloudCover != null) cloud.value = sim.weatherOverride.cloudCover * 100;
-            if (sim.weatherOverride.precip != null) precip.value = sim.weatherOverride.precip;
-            if (sim.weatherOverride.code != null) code.value = sim.weatherOverride.code;
+        const wx = currentWeather();
+        if (![...code.options].some(o => o.value === String(wx.code))) code.add(new Option(String(wx.code), String(wx.code)));
+        code.value = String(wx.code);
+        cloud.value = Math.round((wx.cloudCover || 0) * 100);
+        precip.value = wx.precip || 0;
+        syncMode();
+
+        // --- live readout: time follows the clock, state line shows what PROD computes right now
+        function refresh() {
+            if (root.style.display === 'none') return;
+            if (document.activeElement !== dt) dt.value = fmtDt(getNow().simTime);
+            cloudV.textContent = cloud.value + '%';
+            precipV.textContent = (+precip.value).toFixed(1) + ' mm/h';
+            const now = getNow(), loc = currentLocation(), w = currentWeather();
+            const env = computeEnvironment(now, loc, w);
+            const lo = sim.enabled && sim.locationOverride;
+            const coords = lo && (lo.lat.toFixed(3) + ', ' + lo.lon.toFixed(3));
+            locStatus.textContent = lo
+                ? 'override: ' + (lo.label && lo.label !== coords ? lo.label + ' (' + coords + ')' : coords)
+                : 'real: ' + loc.lat.toFixed(3) + ', ' + loc.lon.toFixed(3) + ' via ' + (loc.source || 'cache');
+            state.textContent =
+                'sun ' + env.sun.altitudeDeg.toFixed(1) + '° ' + (env.sun.isUp ? 'up' : 'down')
+                + ' · moon ' + (env.moon.illumination * 100).toFixed(0) + '% ' + (env.moon.waxing ? 'waxing' : 'waning')
+                + '\nweather ' + (sim.enabled && sim.weatherOverride ? 'override' : 'live') + ': code ' + w.code
+                + ' · cloud ' + ((w.cloudCover || 0) * 100).toFixed(0) + '% · precip ' + (w.precip || 0) + ' mm/h'
+                + (w.isStale && !(sim.enabled && sim.weatherOverride) ? ' · stale' : '')
+                + '\n' + (env.surprises.length ? 'surprises: ' + env.surprises.join(', ') : 'no surprise active');
         }
-        if (sim.locationOverride) {
-            lat.value = sim.locationOverride.lat;
-            lon.value = sim.locationOverride.lon;
-        }
+        refresh();
+        setInterval(refresh, 500);
     }
 
     function hideSimOverlay() {

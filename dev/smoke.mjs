@@ -1,7 +1,8 @@
 // dev/smoke.mjs — headless check that PROD cannot be steered and DEV can.
 // Usage (from repo root):  npx -y -p playwright@1.58.1 -c "node dev/smoke.mjs"
 // First time on a machine:  npx -y playwright@1.58.1 install chromium
-// Screenshots land in dev/.smoke/ (git-ignored). Exit code 1 on any FAIL.
+// Serves the repo on a free port (override with PORT=). Screenshots land in dev/.smoke/ (git-ignored).
+// Exit code 1 on any FAIL.
 import http from 'node:http';
 import fs from 'node:fs';
 import path from 'node:path';
@@ -21,7 +22,6 @@ const { chromium } = playwright;
 const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 const OUT = process.env.OUT || path.join(ROOT, 'dev', '.smoke');
 fs.mkdirSync(OUT, { recursive: true });
-const PORT = Number(process.env.PORT || 8765);
 const types = { '.html': 'text/html', '.js': 'text/javascript', '.png': 'image/png' };
 const server = http.createServer((req, res) => {
   const f = path.join(ROOT, decodeURIComponent(req.url.split('?')[0].split('#')[0]));
@@ -31,7 +31,8 @@ const server = http.createServer((req, res) => {
     res.end(data);
   });
 });
-await new Promise(r => server.listen(PORT, r));
+await new Promise(r => server.listen(Number(process.env.PORT || 0), '127.0.0.1', r));
+const PORT = server.address().port;   // ephemeral by default, so a dev server on 8765 never collides
 
 const browser = await chromium.launch();
 const results = [];
@@ -95,6 +96,29 @@ async function openPage(url) {
   await page.click('button[data-jump="full"]'); await page.waitForTimeout(300);
   const after = await page.inputValue('#sim-dt');
   check('dev: jump ●moon moves sim time', before !== after, `${before} -> ${after}`);
+  // weather override in snap mode changes the inner fill immediately
+  const fillBefore = await page.evaluate(() => AdaptiveClock._dev.getClock().handles.curveBasisClosed.attr('fill'));
+  await page.selectOption('#sim-code', '63');
+  await page.waitForTimeout(300);
+  const fillAfter = await page.evaluate(() => AdaptiveClock._dev.getClock().handles.curveBasisClosed.attr('fill'));
+  check('dev: weather code change snaps inner colour', fillBefore !== fillAfter, `${fillBefore} -> ${fillAfter}`);
+  const wxSeen = await page.evaluate(() => AdaptiveClock._dev.internals.currentWeather().code);
+  check('dev: prod sees weather override', wxSeen === 63, String(wxSeen));
+  // the time field follows the clock
+  await page.selectOption('#sim-speed', '3600');
+  const dt1 = await page.inputValue('#sim-dt'); await page.waitForTimeout(1600);
+  const dt2 = await page.inputValue('#sim-dt');
+  check('dev: time field follows the clock at 1 h/s', dt1 !== dt2, `${dt1} -> ${dt2}`);
+  // smart place input (DMS with hemispheres)
+  await page.fill('#sim-place', "64°09'N 21°56'W"); await page.press('#sim-place', 'Enter'); await page.waitForTimeout(300);
+  const locDms = await page.evaluate(() => AdaptiveClock._dev.internals.currentLocation());
+  check('dev: DMS place parsed', Math.abs(locDms.lat - 64.15) < 0.01 && Math.abs(locDms.lon + 21.933) < 0.01, JSON.stringify(locDms));
+  // "now" returns to wall time while keeping sim on
+  await page.click('#sim-now'); await page.waitForTimeout(300);
+  const nowSt = await page.evaluate(() => ({ t: AdaptiveClock._dev.getClock().now.getTime(), sim: AdaptiveClockDev.sim.enabled }));
+  check('dev: now button returns to wall time, sim stays on', Math.abs(nowSt.t - Date.now()) < 3000 && nowSt.sim, JSON.stringify(nowSt));
+  const stateTxt = await page.textContent('#sim-state');
+  check('dev: state readout rendered', /sun .*° .*moon \d+%/.test(stateTxt), stateTxt.replace(/\n/g, ' | '));
   await page.screenshot({ path: `${OUT}/dev-sim.png` });
   await page.keyboard.press('Shift+G'); await page.waitForTimeout(800);
   const gal = await page.evaluate(() => {

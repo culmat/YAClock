@@ -28,14 +28,21 @@ Without network the clock falls back to Basel and neutral weather.
 
 ## Dev controls
 
+The overlay is a remote control for PROD's inputs: time, location and weather. Everything else
+(colours, moon, surprises) is computed by the unchanged prod code from those three inputs. The
+**state** block at the bottom shows what prod sees right now: sun altitude, moon illumination,
+the effective weather and which surprise detectors fired.
+
 | Control | Effect |
 |---|---|
-| **Shift+S** | Toggle the SIM overlay. Turning it off returns to wall time and clears the hash. |
+| **Shift+S** | Toggle the overlay. Turning it off returns to wall time, real place and live weather, and clears the hash. |
 | **Shift+G** / **Esc** | Open / close the scenario gallery: 16 fixed states rendered as static SVGs. |
-| datetime, speed | Sim time anchor and rate (`pause`, 1×, 60×, 3600×, 86400×). |
-| cloud, precip, code | Weather override. `code` is a WMO weather code (0 clear … 95 thunder). |
-| lat, lon | Location override. "use my location" writes browser geolocation into the cache instead. |
-| ↑sun ↓sun | Jump to next sunrise / sunset at the current location. |
+| time, **now** | Sim time. The field follows the clock while you are not editing it. **now** jumps back to wall-clock time. |
+| speed | `paused`, `real time`, `1 min / s`, `1 hour / s`, `1 day / s`, `1 week / s`. |
+| mode | **snap**: every change jumps straight to the final colours, the same thing the gallery shows. **ease**: colours drift in like PROD does (inner sky ~5 min, divided by speed). |
+| weather, cloud, precip | Weather override: WMO code (0 clear … 95 thunderstorm), cloud cover, precipitation. **real weather** drops the override. The sliders start at the live values. |
+| place | Smart input: a place name (geocoded via open-meteo), `47.56, 7.59`, `47.56N 7.59E` or `64°09'N 21°56'W`. Enter or **go**. Presets cover the astronomically interesting latitudes. **real place** drops the override; **use my location** writes browser geolocation into the cache. |
+| ↑sun ↓sun | Jump to next sunrise / sunset at the current place. |
 | ●moon ○moon | Jump to next full / new moon. |
 | solst, equi | Jump to next solstice / equinox. |
 | ☼ecl ☾ecl | Jump to the next solar / lunar eclipse in the built-in table (2026–2035). |
@@ -44,11 +51,12 @@ Sim state round-trips through the URL hash, so a scenario is a link:
 
 ```
 dev/clock.html#sim=2026-08-12T17:46&speed=1&lat=64&lon=-22&weather=code:0,cloudCover:0.2
-dev/clock.html#sim=2026-06-21T21:20&speed=60                       # golden hour, 1 min/s
+dev/clock.html#sim=2026-06-21T21:20&speed=60&ease=1                # golden hour easing in, 1 min/s
 dev/clock.html#sim=2026-03-03T11:33&lat=35&lon=-120                 # lunar eclipse, blood tint
 ```
 
-`weather=` takes comma-separated `key:value` pairs from `{code, cloudCover (0–1), precip (mm), temp}`.
+`weather=` takes comma-separated `key:value` pairs from `{code, cloudCover (0–1), precip (mm/h), temp}`.
+`ease=1` selects ease mode; snap is the default.
 
 ### Scenario gallery
 
@@ -64,6 +72,7 @@ add a detector in prod. The gallery draws its own static SVG, so it shows target
 
 - `setTimeSource({ now(), speed() } | null)` — the only way to move the clock off wall time
 - `setOverrides({ location, weather })` — the only way to fake location or weather
+- `snap()` — makes the next tick copy target colours instead of easing (used by snap mode)
 - `getClock()`, `getNow()`, `tick()` and `internals` — pure functions and caches for the gallery and jump search
 
 The harness also swaps the YAClock instance's `tick` so the hands follow sim time. Prod never reads
