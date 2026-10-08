@@ -102,6 +102,14 @@ async function openPage(url) {
   await page.waitForTimeout(300);
   const fillAfter = await page.evaluate(() => AdaptiveClock._dev.getClock().handles.curveBasisClosed.attr('fill'));
   check('dev: weather code change snaps inner colour', fillBefore !== fillAfter, `${fillBefore} -> ${fillAfter}`);
+  const glyph = async (k) => page.evaluate((k) => Number(document.getElementById('yaclock-wx-layer-' + k).getAttribute('opacity')), k);
+  check('dev: rain glyphs appear for code 63', (await glyph('rain')) > 0.3 && (await glyph('snow')) === 0, `rain ${await glyph('rain')}`);
+  await page.selectOption('#sim-code', '73'); await page.waitForTimeout(300);
+  check('dev: snow glyphs replace rain for code 73', (await glyph('snow')) > 0.4 && (await glyph('rain')) === 0, `snow ${await glyph('snow')}`);
+  await page.selectOption('#sim-code', '95'); await page.waitForTimeout(1300);
+  await page.screenshot({ path: `${OUT}/dev-storm.png` });
+  check('dev: thunderstorm shows rain + bolt', (await glyph('rain')) > 0.3 && (await glyph('bolt')) > 0.3, `bolt ${await glyph('bolt')}`);
+  await page.selectOption('#sim-code', '63'); await page.waitForTimeout(300);
   const wxSeen = await page.evaluate(() => AdaptiveClock._dev.internals.currentWeather().code);
   check('dev: prod sees weather override', wxSeen === 63, String(wxSeen));
   // the time field follows the clock
@@ -161,8 +169,11 @@ async function openPage(url) {
     const g = document.querySelector('#yaclock-gallery');
     return { present: !!g, cells: g ? g.querySelectorAll('svg').length : 0 };
   });
-  check('dev: gallery opens with 16 scenarios', gal.present && gal.cells === 16, JSON.stringify(gal));
+  check('dev: gallery opens with 17 scenarios', gal.present && gal.cells === 17, JSON.stringify(gal));
   await page.screenshot({ path: `${OUT}/dev-gallery.png` });
+  await page.evaluate(() => { const g = document.querySelector('#yaclock-gallery'); g.scrollTop = g.scrollHeight; });
+  await page.waitForTimeout(300);
+  await page.screenshot({ path: `${OUT}/dev-gallery-bottom.png` });
   await page.keyboard.press('Escape'); await page.keyboard.press('Shift+S'); await page.waitForTimeout(500);
   const off = await page.evaluate(() => ({
     simEnabled: AdaptiveClockDev.sim.enabled, isSim: AdaptiveClock._dev.getNow().isSim,

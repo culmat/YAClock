@@ -31,7 +31,8 @@
         moonShape: 600000,
         dim: 30000,
         wobble: 6000,
-        ink: 15000
+        ink: 15000,
+        weather: 20000
     };
 
     const STORAGE_KEYS = {
@@ -102,6 +103,7 @@
         moonTint: null,         // HSL or null
         innerTintBoost: 0,      // golden hour saturation lift
         ink: INK_DARK.slice(),  // HSL of all strokes
+        glyphs: { cloud: 0, rain: 0, snow: 0, fog: 0, bolt: 0 },   // eased layer opacities
         inkIsLight: false       // hysteresis state for the ink choice
     };
 
@@ -111,6 +113,7 @@
     let moonDark = null;        // full-disc dark backdrop (the unlit moon)
     let moonBright = null;      // bright illuminated region (SVG path)
     let moonOutline = null;     // subtle outline stroke
+    let weatherGlyphs = null;   // { layers, setInk, setOpacities } from appendWeatherLayers
     let lastTickMs = 0;
     let firstPaint = true;
 
@@ -527,6 +530,94 @@
     ];
 
     // ============================================================
+    // WEATHER GLYPHS — thin line-art inside the sky window
+    // Clouds, rain, snow, fog and a lightning bolt, drawn in the current ink and clipped to the
+    // closed spline. Opacities come from the WMO code, cloud cover and precipitation.
+    // ============================================================
+
+    const SVG_NS = 'http://www.w3.org/2000/svg';
+    const E = 400;   // YAClock viewBox edge
+    function svgEl(name, attrs, parent) {
+        const n = document.createElementNS(SVG_NS, name);
+        for (const k in attrs) n.setAttribute(k, attrs[k]);
+        if (parent) parent.appendChild(n);
+        return n;
+    }
+    const CLOUD_D = 'M -30 10 C -42 10 -42 -8 -30 -8 C -30 -24 -8 -28 -2 -16 C 6 -28 30 -24 28 -8 C 40 -8 40 10 28 10 Z';
+    const BOLT_D  = 'M 4 -16 L -6 2 L 1 2 L -3 16 L 8 -3 L 1 -3 Z';
+    const CLOUDS  = [   // a loose cluster around the centre; the clip decides what shows
+        { x: 168, y: 162, s: 1.0 }, { x: 242, y: 214, s: 0.75 }, { x: 176, y: 246, s: 0.6 },
+        { x: 252, y: 152, s: 0.5 }, { x: 206, y: 198, s: 0.42 }
+    ];
+    const LINE = { stroke: 'currentColor', 'stroke-linecap': 'round' };
+    function asterisk(parent, cx, cy, r) {
+        for (const a of [0, 60, 120]) {
+            const dx = Math.cos(a * RAD) * r, dy = Math.sin(a * RAD) * r;
+            svgEl('line', Object.assign({ x1: cx - dx, y1: cy - dy, x2: cx + dx, y2: cy + dy, 'stroke-width': 0.7 }, LINE), parent);
+        }
+    }
+
+    // Appends patterns, a clip on the closed path and the glyph layers to an <svg> element.
+    // `after`: the element to insert the glyph group behind (keeps the open spline and moon on top).
+    function appendWeatherLayers(svgNode, innerPathId, prefix, after) {
+        const defs = svgEl('defs', {}, svgNode);
+        const clip = svgEl('clipPath', { id: prefix + '-clip' }, defs);
+        svgEl('use', { href: '#' + innerPathId }, clip);
+        const patterns = [];
+        const rain = svgEl('pattern', { id: prefix + '-rain', patternUnits: 'userSpaceOnUse', width: 14, height: 16, patternTransform: 'rotate(14)' }, defs);
+        svgEl('line', Object.assign({ x1: 3, y1: 1, x2: 3, y2: 8, 'stroke-width': 0.9 }, LINE), rain);
+        svgEl('line', Object.assign({ x1: 10, y1: 8, x2: 10, y2: 15, 'stroke-width': 0.9 }, LINE), rain);
+        const snow = svgEl('pattern', { id: prefix + '-snow', patternUnits: 'userSpaceOnUse', width: 22, height: 22 }, defs);
+        asterisk(snow, 6, 6, 2.3); asterisk(snow, 17, 15, 1.7);
+        const fog = svgEl('pattern', { id: prefix + '-fog', patternUnits: 'userSpaceOnUse', width: 46, height: 11 }, defs);
+        svgEl('line', Object.assign({ x1: 2, y1: 5.5, x2: 30, y2: 5.5, 'stroke-width': 0.8 }, LINE), fog);
+        patterns.push(rain, snow, fog);
+
+        const g = svgEl('g', { class: 'weather-glyphs', 'clip-path': 'url(#' + prefix + '-clip)', 'pointer-events': 'none' });
+        if (after && after.parentNode) after.parentNode.insertBefore(g, after.nextSibling); else svgNode.appendChild(g);
+        const full = { x: 0, y: 0, width: E, height: E, opacity: 0 };
+        const layers = {};
+        layers.fog  = svgEl('rect', Object.assign({ id: prefix + '-layer-fog',  fill: 'url(#' + prefix + '-fog)' }, full), g);
+        layers.cloud = svgEl('g', { id: prefix + '-layer-cloud', opacity: 0, fill: 'none', stroke: 'currentColor', 'stroke-width': 1, 'stroke-linejoin': 'round' }, g);
+        CLOUDS.forEach(c => svgEl('path', { d: CLOUD_D, transform: 'translate(' + c.x + ',' + c.y + ') scale(' + c.s + ')' }, layers.cloud));
+        layers.rain = svgEl('rect', Object.assign({ id: prefix + '-layer-rain', fill: 'url(#' + prefix + '-rain)' }, full), g);
+        layers.snow = svgEl('rect', Object.assign({ id: prefix + '-layer-snow', fill: 'url(#' + prefix + '-snow)' }, full), g);
+        layers.bolt = svgEl('path', { id: prefix + '-layer-bolt', d: BOLT_D, transform: 'translate(214,190) scale(1.15)', opacity: 0,
+            fill: 'none', stroke: 'currentColor', 'stroke-width': 1.2, 'stroke-linejoin': 'round' }, g);
+        return {
+            layers,
+            // Anchor the cloud cluster and the bolt where the window actually is (its centroid);
+            // `sel` is an optional d3 transition factory for a smooth move with the hands.
+            setAnchor(cx, cy, sel) {
+                const cloudT = 'translate(' + (cx - E / 2) + ',' + (cy - E / 2) + ')';
+                const boltT  = 'translate(' + cx + ',' + cy + ') scale(1.15)';
+                if (sel) { sel(layers.cloud).attr('transform', cloudT); sel(layers.bolt).attr('transform', boltT); }
+                else { layers.cloud.setAttribute('transform', cloudT); layers.bolt.setAttribute('transform', boltT); }
+            },
+            setInk(ink) { g.setAttribute('color', ink); patterns.forEach(p => p.setAttribute('color', ink)); },
+            setOpacities(o) { for (const k in layers) layers[k].setAttribute('opacity', (o[k] || 0).toFixed(3)); }
+        };
+    }
+
+    // Target opacity per layer for a weather object { code, cloudCover, precip }.
+    function weatherLayerTargets(w) {
+        const c = w.code || 0, cc = w.cloudCover || 0, p = w.precip || 0;
+        const t = { cloud: 0, rain: 0, snow: 0, fog: 0, bolt: 0 };
+        t.cloud = Math.min(1, Math.max(0, (cc - 0.15) / 0.7)) * 0.55;
+        if (c === 45 || c === 48) { t.fog = 0.5; t.cloud = Math.min(t.cloud, 0.2); }
+        const drizzle = c >= 51 && c <= 57;
+        const rain = (c >= 61 && c <= 67) || (c >= 80 && c <= 82) || c >= 95;
+        const snow = (c >= 71 && c <= 77) || c === 85 || c === 86;
+        const strength = Math.min(1, p / 4);          // 4 mm/h and up reads as full
+        if (drizzle) t.rain = 0.22;
+        if (rain)    t.rain = 0.35 + 0.25 * strength;
+        if (snow)    t.snow = 0.45 + 0.3 * strength;
+        if (!rain && !drizzle && !snow && p > 0) t.rain = 0.2 + 0.3 * strength;   // code says dry, sensor says wet
+        if (c >= 95) t.bolt = 0.4;
+        return t;
+    }
+
+    // ============================================================
     // VISUALS — compute target colors from env, ease, write to DOM
     // ============================================================
 
@@ -582,6 +673,7 @@
             current.moonTint = targetMoon.slice();
             current.inkIsLight = inkForLightness(targetSky[2]) === INK_LIGHT;
             current.ink = (current.inkIsLight ? INK_LIGHT : INK_DARK).slice();
+            current.glyphs = weatherLayerTargets(env.weather);
             current.moonRadiusScale = env.modifiers.moonRadiusScale;
             current.dimming = env.modifiers.dimming;
             current.moonPhase = env.moon.phase;
@@ -601,6 +693,8 @@
             );
             current.moonPhase = easeScalar(current.moonPhase, targetPhase, dtMs, TAU.moonPhase, speed);
             current.ink = easeHsl(current.ink, computeTargetInk(current.sky[2]), dtMs, TAU.ink, speed);
+            const tg = weatherLayerTargets(env.weather);
+            for (const k in tg) current.glyphs[k] = easeScalar(current.glyphs[k], tg[k], dtMs, TAU.weather, speed);
         }
 
         // Wobble (golden hour / thunder): a small periodic lightness shift on inner.
@@ -619,6 +713,16 @@
         for (const ct in clock.handles) clock.handles[ct].attr('stroke', ink);
         if (clock.centerCircle) clock.centerCircle.attr('stroke', ink).attr('fill', ink);
         if (moonOutline) moonOutline.attr('stroke', ink).attr('stroke-opacity', 0.5);
+        if (weatherGlyphs) {
+            const o = Object.assign({}, current.glyphs);
+            // Lightning: faint bolt, with an occasional flash (about one tick in eight).
+            if (o.bolt > 0.05 && Math.random() < 0.125) o.bolt = Math.min(1, o.bolt * 2.4);
+            weatherGlyphs.setInk(ink);
+            weatherGlyphs.setOpacities(o);
+            const pts = [clock.center, clock.points.HOUR, clock.points.MINUTE, clock.points.SECOND];
+            const cx = pts.reduce((a, p) => a + p[0], 0) / 4, cy = pts.reduce((a, p) => a + p[1], 0) / 4;
+            weatherGlyphs.setAnchor(cx, cy, (node) => clock.transition(d3.select(node)));
+        }
         updateMoon(env);
     }
 
@@ -837,6 +941,8 @@
 
         // 3. Wire references to the SVG elements we mutate, then repaint
         innerHandle = clock.handles['curveBasisClosed'];
+        innerHandle.attr('id', 'yaclock-inner');
+        weatherGlyphs = appendWeatherLayers(clock.svg.node(), 'yaclock-inner', 'yaclock-wx', innerHandle.node());
         ensureMoonGroup();
         tick();
 
@@ -860,6 +966,7 @@
         snap: () => { firstPaint = true; },   // next tick jumps straight to target colours
         internals: {
             computeEnvironment, computeTargetSky, computeTargetInner, computeMoonBrightHsl, inkForLightness,
+            appendWeatherLayers, weatherLayerTargets,
             moonPath, moonPhase, sunPosition, solsticeEquinox, findNextEclipse, eclipsePeak,
             currentLocation, currentWeather, fetchWeather, saveCached,
             cache, STORAGE_KEYS, NEUTRAL_WEATHER, fmtHsl

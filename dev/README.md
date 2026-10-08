@@ -36,12 +36,12 @@ the effective weather and which surprise detectors fired.
 | Control | Effect |
 |---|---|
 | **Shift+S** | Toggle the overlay. Turning it off returns to wall time, real place and live weather, and clears the hash. |
-| **Shift+G** / **Esc** | Open / close the scenario gallery: 16 fixed states rendered as static SVGs. |
+| **Shift+G** / **Esc** | Open / close the scenario gallery: 17 fixed states rendered as static SVGs. |
 | time, **now** | Sim time. The field follows the clock while you are not editing it. **now** jumps back to wall-clock time. |
 | step | Nudge sim time by −1 d, −1 h, +1 h, +1 d, +7 d. With snap mode this is the calm way to inspect states one by one. |
 | speed | `paused`, `real time`, `1 min / s`, `1 hour / s`, `1 day / s`, `1 week / s`. Above real time the hands are driven at 4 Hz without transitions, so the clock flows like a time-lapse video instead of re-animating every second. |
 | mode | **snap**: every change jumps straight to the final colours, the same thing the gallery shows. **ease**: colours drift in like PROD does (inner sky ~5 min, divided by speed). |
-| weather, cloud, precip | Weather override: WMO code (0 clear … 95 thunderstorm), cloud cover, precipitation. While no override is active the controls track the live weather; touching one creates the override, **real weather** drops it again. |
+| weather, cloud, precip | Weather override: WMO code (0 clear … 95 thunderstorm), cloud cover, precipitation. While no override is active the controls track the live weather; touching one creates the override, **real weather** drops it again. Besides tinting the sky window, weather draws thin line-art glyphs inside it: cloud outlines scale with cloud cover, rain strokes / snow asterisks / fog hatching follow the code and get denser with precipitation, a thunderstorm adds a bolt that flashes now and then. |
 | place | Smart input: a place name (geocoded via open-meteo), `47.56, 7.59`, `47.56N 7.59E` or `64°09'N 21°56'W`. Enter or **go**. Presets cover the astronomically interesting latitudes. **prod location** drops the override and shows what PROD itself uses: the IP-based lookup (ipapi / ipwho), Basel as fallback. **browser GPS** asks the browser for a precise position and installs it as a sim override; PROD never asks for geolocation and the dev harness never writes to PROD's caches. |
 | ↑sun ↓sun | Jump to next sunrise / sunset at the current place. |
 | ●moon ○moon | Jump to next full / new moon. |
@@ -83,7 +83,7 @@ The harness also swaps the YAClock instance's `tick` so the hands follow sim tim
 
 `smoke.mjs` serves the repo on a local port, opens both pages in headless Chromium and checks that
 prod ignores `#sim=`, Shift+S and Shift+G, while dev honours the hash, jumps, opens the gallery with
-16 cells and returns to wall time when sim is switched off. Screenshots go to `dev/.smoke/`.
+17 cells and returns to wall time when sim is switched off. Screenshots go to `dev/.smoke/`.
 
 ```sh
 npx -y playwright@1.58.1 install chromium            # once per machine

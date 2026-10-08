@@ -17,6 +17,7 @@
     // PROD internals, assigned in attach() from hooks.internals (pure functions + caches).
     let currentLocation, currentWeather, NEUTRAL_WEATHER,
         computeEnvironment, computeTargetSky, computeTargetInner, computeMoonBrightHsl, inkForLightness, fmtHsl,
+        appendWeatherLayers, weatherLayerTargets,
         moonPath, moonPhase, sunPosition, solsticeEquinox, findNextEclipse, eclipsePeak;
 
     // ============================================================
@@ -465,10 +466,11 @@
         { label: 'astronomical dawn',      time: '2026-06-21T04:00',      weather: { code: 0,  cloudCover: 0.1,  precip: 0 } },
         { label: 'sunrise clear',          time: '2026-06-21T05:30',      weather: { code: 0,  cloudCover: 0.1,  precip: 0 } },
         { label: 'midday clear (summer)',  time: '2026-06-21T13:00',      weather: { code: 0,  cloudCover: 0,    precip: 0 } },
-        { label: 'midday overcast',        time: '2026-06-21T13:00',      weather: { code: 3,  cloudCover: 1,    precip: 0 } },
-        { label: 'midday rain',            time: '2026-06-21T13:00',      weather: { code: 63, cloudCover: 0.95, precip: 3 } },
-        { label: 'thunderstorm',           time: '2026-07-15T17:00',      weather: { code: 95, cloudCover: 1,    precip: 5 } },
-        { label: 'winter snow',            time: '2026-12-21T13:00',      weather: { code: 73, cloudCover: 1,    precip: 1 } },
+        { label: 'overcast',               time: '2026-06-21T10:09:35',   weather: { code: 3,  cloudCover: 1,    precip: 0 } },
+        { label: 'morning fog',            time: '2026-10-12T07:40:35',   weather: { code: 45, cloudCover: 0.9,  precip: 0 } },
+        { label: 'rain',                   time: '2026-06-21T10:09:35',   weather: { code: 63, cloudCover: 0.95, precip: 3 } },
+        { label: 'thunderstorm',           time: '2026-07-15T16:09:35',   weather: { code: 95, cloudCover: 1,    precip: 5 } },
+        { label: 'winter snow',            time: '2026-12-21T10:09:35',   weather: { code: 73, cloudCover: 1,    precip: 1 } },
         { label: 'sunset golden hour',     time: '2026-06-21T21:20',      weather: { code: 0,  cloudCover: 0.1,  precip: 0 } },
         { label: 'civil twilight',         time: '2026-06-21T22:10',      weather: { code: 0,  cloudCover: 0.2,  precip: 0 } },
         { label: 'full moon night',        time: '2026-05-31T02:00',      weather: { code: 0,  cloudCover: 0,    precip: 0 } },
@@ -499,7 +501,9 @@
 
     // Builds a standalone SVG snapshot of the clock under a given scenario.
     // No smoothing — values are exact targets. Returns an <svg> element.
+    let galleryCellSeq = 0;
     function renderScenarioSvg(s) {
+        const prefix = 'gal' + (galleryCellSeq++);
         const time = scenarioTime(s);
         const loc = scenarioLocation(s);
         const weather = scenarioWeather(s);
@@ -536,7 +540,12 @@
         closedP.setAttribute('stroke', ink);
         closedP.setAttribute('stroke-width', '1.5');
         closedP.setAttribute('stroke-linecap', 'round');
+        closedP.setAttribute('id', prefix + '-inner');
         svg.appendChild(closedP);
+        const wx = appendWeatherLayers(svg, prefix + '-inner', prefix, closedP);
+        wx.setInk(ink);
+        wx.setOpacities(weatherLayerTargets(weather));
+        wx.setAnchor(pts.reduce((a, p) => a + p[0], 0) / 4, pts.reduce((a, p) => a + p[1], 0) / 4);
 
         // Open curve (the second-hand spline)
         const openP = document.createElementNS(svgNS, 'path');
@@ -646,6 +655,7 @@
         hooks = devHooks;
         ({ currentLocation, currentWeather, NEUTRAL_WEATHER,
            computeEnvironment, computeTargetSky, computeTargetInner, computeMoonBrightHsl, inkForLightness, fmtHsl,
+        appendWeatherLayers, weatherLayerTargets,
            moonPath, moonPhase, sunPosition, solsticeEquinox, findNextEclipse, eclipsePeak } = hooks.internals);
 
         parseHash();
