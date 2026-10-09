@@ -103,7 +103,7 @@
         moonTint: null,         // HSL or null
         innerTintBoost: 0,      // golden hour saturation lift
         ink: INK_DARK.slice(),  // HSL of all strokes
-        glyphs: { cloud: 0, rain: 0, snow: 0, fog: 0, bolt: 0 },   // eased layer opacities
+        glyphs: { cloud: 0, rain: 0, snow: 0, fog: 0, hail: 0, bolt: 0 },   // eased layer opacities
         inkIsLight: false       // hysteresis state for the ink choice
     };
 
@@ -343,22 +343,84 @@
     // WEATHER → INNER COLOR
     // ============================================================
 
-    function weatherTint(code) {
-        if (code === 0) return [45, 80, 80];
-        if (code >= 1 && code <= 3) return [0, 0, 85];
-        if (code === 45 || code === 48) return [40, 10, 80];
-        if ((code >= 51 && code <= 67) || (code >= 80 && code <= 82)) return [210, 40, 60];
-        if ((code >= 71 && code <= 77) || code === 85 || code === 86) return [210, 15, 95];
-        if (code >= 95) return [260, 30, 35];
-        return [0, 0, 85];
+    // ============================================================
+    // WEATHER MODEL — one table drives tint, glyphs and the dev controls
+    // ============================================================
+    // The WMO code decides the KIND of weather and a typical intensity class; measured precipitation
+    // refines the intensity. kind: clear | cloud | fog | drizzle | rain | snow | storm.
+    //   i       intensity class of the code (light ≈ .2, moderate ≈ .5, heavy ≈ .9)
+    //   cloud   typical cloud cover 0..1, precip typical mm/h  → slider defaults in the dev overlay
+    // Real data always wins over these defaults.
+    const WMO = {
+        0:  { label: 'clear sky',                    kind: 'clear',   i: 0,    cloud: 0,    precip: 0 },
+        1:  { label: 'mainly clear',                 kind: 'cloud',   i: 0,    cloud: 0.15, precip: 0 },
+        2:  { label: 'partly cloudy',                kind: 'cloud',   i: 0,    cloud: 0.5,  precip: 0 },
+        3:  { label: 'overcast',                     kind: 'cloud',   i: 0,    cloud: 1,    precip: 0 },
+        45: { label: 'fog',                          kind: 'fog',     i: 0.5,  cloud: 0.6,  precip: 0 },
+        48: { label: 'rime fog',                     kind: 'fog',     i: 0.85, cloud: 0.7,  precip: 0 },
+        51: { label: 'light drizzle',                kind: 'drizzle', i: 0.2,  cloud: 0.8,  precip: 0.2 },
+        53: { label: 'moderate drizzle',             kind: 'drizzle', i: 0.5,  cloud: 0.85, precip: 0.5 },
+        55: { label: 'dense drizzle',                kind: 'drizzle', i: 0.85, cloud: 0.9,  precip: 1 },
+        56: { label: 'light freezing drizzle',       kind: 'drizzle', i: 0.3,  cloud: 0.85, precip: 0.2 },
+        57: { label: 'dense freezing drizzle',       kind: 'drizzle', i: 0.85, cloud: 0.9,  precip: 1 },
+        61: { label: 'slight rain',                  kind: 'rain',    i: 0.2,  cloud: 0.85, precip: 0.5 },
+        63: { label: 'moderate rain',                kind: 'rain',    i: 0.5,  cloud: 0.9,  precip: 2.5 },
+        65: { label: 'heavy rain',                   kind: 'rain',    i: 0.9,  cloud: 1,    precip: 8 },
+        66: { label: 'light freezing rain',          kind: 'rain',    i: 0.3,  cloud: 0.9,  precip: 1 },
+        67: { label: 'heavy freezing rain',          kind: 'rain',    i: 0.8,  cloud: 1,    precip: 5 },
+        71: { label: 'slight snow',                  kind: 'snow',    i: 0.2,  cloud: 0.85, precip: 0.3 },
+        73: { label: 'moderate snow',                kind: 'snow',    i: 0.5,  cloud: 0.9,  precip: 1 },
+        75: { label: 'heavy snow',                   kind: 'snow',    i: 0.9,  cloud: 1,    precip: 3 },
+        77: { label: 'snow grains',                  kind: 'snow',    i: 0.25, cloud: 0.85, precip: 0.3 },
+        80: { label: 'slight rain showers',          kind: 'rain',    i: 0.25, cloud: 0.7,  precip: 1 },
+        81: { label: 'moderate rain showers',        kind: 'rain',    i: 0.55, cloud: 0.85, precip: 4 },
+        82: { label: 'violent rain showers',         kind: 'rain',    i: 0.95, cloud: 1,    precip: 12 },
+        85: { label: 'slight snow showers',          kind: 'snow',    i: 0.3,  cloud: 0.7,  precip: 0.5 },
+        86: { label: 'heavy snow showers',           kind: 'snow',    i: 0.85, cloud: 0.9,  precip: 2.5 },
+        95: { label: 'thunderstorm',                 kind: 'storm',   i: 0.6,  cloud: 1,    precip: 4 },
+        96: { label: 'thunderstorm, slight hail',    kind: 'storm',   i: 0.75, cloud: 1,    precip: 6,  hail: true },
+        99: { label: 'thunderstorm, heavy hail',     kind: 'storm',   i: 1,    cloud: 1,    precip: 12, hail: true }
+    };
+    const PRECIP_REF  = { drizzle: 1, rain: 6, snow: 3, storm: 8 };            // mm/h that reads as "full"
+    const COVER_FLOOR = { drizzle: 0.6, rain: 0.7, snow: 0.7, storm: 0.9 };    // rain falls from clouds
+
+    // Weather → { kind, intensity 0..1, cover 0..1, hail }. Code gives the kind and a base intensity,
+    // measured precipitation adds to it; cloud cover never drops below what the kind implies.
+    function classifyWeather(w) {
+        const def = WMO[w.code] || { kind: 'cloud', i: 0 };
+        const p = w.precip || 0;
+        let kind = def.kind, intensity = 0;
+        if (PRECIP_REF[kind]) {
+            intensity = Math.min(1, Math.max(0.1, 0.6 * def.i + 0.5 * Math.min(1, p / PRECIP_REF[kind])));
+        } else if (p > 0.05) {                          // code says dry, the sensor says wet
+            kind = 'rain';
+            intensity = Math.min(0.5, Math.max(0.1, 0.5 * p / PRECIP_REF.rain));
+        } else if (kind === 'fog') {
+            intensity = def.i;
+        }
+        const cover = Math.max(w.cloudCover || 0, COVER_FLOOR[kind] || 0);
+        return { kind, intensity, cover, hail: !!def.hail };
     }
 
-    function weatherStrength(code, cloudCover) {
-        if ((code >= 51 && code <= 67) || (code >= 80 && code <= 82)) return 0.6;
-        if ((code >= 71 && code <= 77) || code === 85 || code === 86) return 0.6;
-        if (code === 45 || code === 48) return 0.5;
-        if (code >= 95) return 0.55;
-        return Math.min(0.5, 0.35 * cloudCover + 0.05);
+    function weatherTint(k) {
+        switch (k.kind) {
+            case 'clear':   return [45, 80, 80];
+            case 'fog':     return [40, 10, 80];
+            case 'drizzle': case 'rain': return [210, 40, 60];
+            case 'snow':    return [210, 15, 95];
+            case 'storm':   return [260, 30, 35];
+            default:        return [0, 0, 85];
+        }
+    }
+
+    // How far the sky window is pulled towards the weather tint: heavier weather pulls harder.
+    function weatherStrength(k) {
+        switch (k.kind) {
+            case 'drizzle': case 'rain': case 'snow': return 0.25 + 0.4 * k.intensity;
+            case 'storm': return 0.35 + 0.3 * k.intensity;
+            case 'fog':   return 0.3 + 0.3 * k.intensity;
+            default:      return Math.min(0.5, 0.35 * k.cover + 0.05);
+        }
     }
 
     // ============================================================
@@ -530,9 +592,11 @@
     ];
 
     // ============================================================
-    // WEATHER GLYPHS — thin line-art inside the sky window
-    // Clouds, rain, snow, fog and a lightning bolt, drawn in the current ink and clipped to the
-    // closed spline. Opacities come from the WMO code, cloud cover and precipitation.
+    // WEATHER GLYPHS — hand-drawn line art inside the sky window
+    // Clouds are soft-bodied sketches (gradient fill, three jittered pencil outlines, belly
+    // hatching), rain / snow / hail / fog are SVG patterns whose spacing follows the intensity
+    // (light = few, far apart; heavy = dense), lightning is a freshly generated forked bolt.
+    // No filters: everything is plain geometry, so it stays cheap while the hands move.
     // ============================================================
 
     const SVG_NS = 'http://www.w3.org/2000/svg';
@@ -543,77 +607,187 @@
         if (parent) parent.appendChild(n);
         return n;
     }
-    const CLOUD_D = 'M -30 10 C -42 10 -42 -8 -30 -8 C -30 -24 -8 -28 -2 -16 C 6 -28 30 -24 28 -8 C 40 -8 40 10 28 10 Z';
-    const BOLT_D  = 'M 4 -16 L -6 2 L 1 2 L -3 16 L 8 -3 L 1 -3 Z';
-    const CLOUDS  = [   // a loose cluster around the centre; the clip decides what shows
-        { x: 168, y: 162, s: 1.0 }, { x: 242, y: 214, s: 0.75 }, { x: 176, y: 246, s: 0.6 },
-        { x: 252, y: 152, s: 0.5 }, { x: 206, y: 198, s: 0.42 }
-    ];
+    const lerp = (a, b, t) => a + (b - a) * t;
+    function rng(seed) {   // mulberry32
+        let a = seed >>> 0;
+        return function () {
+            a = (a + 0x6D2B79F5) >>> 0;
+            let t = a;
+            t = Math.imul(t ^ (t >>> 15), t | 1);
+            t ^= t + Math.imul(t ^ (t >>> 7), t | 61);
+            return ((t ^ (t >>> 14)) >>> 0) / 4294967296;
+        };
+    }
     const LINE = { stroke: 'currentColor', 'stroke-linecap': 'round' };
-    function asterisk(parent, cx, cy, r) {
-        for (const a of [0, 60, 120]) {
+    const setLine = (el, x1, y1, x2, y2) => { el.setAttribute('x1', x1); el.setAttribute('y1', y1); el.setAttribute('x2', x2); el.setAttribute('y2', y2); };
+    function asterisk(parent, sw) {
+        return [0, 60, 120].map(() => svgEl('line', Object.assign({ 'stroke-width': sw }, LINE), parent));
+    }
+    function placeAsterisk(lines, cx, cy, r) {
+        [0, 60, 120].forEach((a, i) => {
             const dx = Math.cos(a * RAD) * r, dy = Math.sin(a * RAD) * r;
-            svgEl('line', Object.assign({ x1: cx - dx, y1: cy - dy, x2: cx + dx, y2: cy + dy, 'stroke-width': 0.7 }, LINE), parent);
-        }
+            setLine(lines[i], cx - dx, cy - dy, cx + dx, cy + dy);
+        });
     }
 
-    // Appends patterns, a clip on the closed path and the glyph layers to an <svg> element.
+    // Cloud clusters near the window centre; `thr` is the cloud cover at which a cluster appears,
+    // so 20 % shows one small cloud, 100 % a full bank.
+    const CLOUDS = [
+        { x: 190, y: 182, w: 46, h: 27, thr: 0.05, seed: 11 },
+        { x: 214, y: 208, w: 40, h: 23, thr: 0.22, seed: 23 },
+        { x: 188, y: 228, w: 36, h: 21, thr: 0.38, seed: 37 },
+        { x: 217, y: 176, w: 32, h: 19, thr: 0.52, seed: 41 },
+        { x: 201, y: 204, w: 30, h: 18, thr: 0.68, seed: 59 },
+        { x: 180, y: 204, w: 34, h: 20, thr: 0.82, seed: 61 }
+    ];
+    const cloudLine = d3.line().curve(d3.curveCardinalClosed.tension(0.35));
+    // Scalloped cumulus outline: |sin| lobes on an ellipse, flattened belly, optional pencil jitter.
+    function cloudPoints(shape, w, h, rand, jit) {
+        const pts = [], n = 64;
+        for (let i = 0; i < n; i++) {
+            const a = (i / n) * 2 * Math.PI;
+            const bump = 0.78 + 0.22 * Math.abs(Math.sin(shape.bumps * a / 2 + shape.phase));
+            let x = Math.cos(a) * bump * w / 2, y = Math.sin(a) * bump * h / 2;
+            if (y > 0) y *= 0.55;
+            pts.push([x + (rand() - 0.5) * jit, y + (rand() - 0.5) * jit]);
+        }
+        return pts;
+    }
+    function buildCloud(parent, c, prefix) {
+        const rs = rng(c.seed);
+        const shape = { bumps: 5 + Math.floor(rs() * 3), phase: rs() * 6.283 };
+        const at = (pts) => pts.map(p => [c.x + p[0], c.y + p[1]]);
+        const g = svgEl('g', { opacity: 0 }, parent);
+        svgEl('path', { d: cloudLine(at(cloudPoints(shape, c.w, c.h, rs, 0))), fill: 'url(#' + prefix + '-cloudfill)', stroke: 'none' }, g);
+        [[0.8, 0.85, 0.8], [0.55, 0.5, 1.5], [0.4, 0.32, 2.2]].forEach(([sw, op, jit]) => {
+            svgEl('path', { d: cloudLine(at(cloudPoints(shape, c.w * (1 + (rs() - 0.5) * 0.06), c.h, rs, jit))),
+                fill: 'none', stroke: 'currentColor', 'stroke-width': sw, 'stroke-opacity': op, 'stroke-linejoin': 'round' }, g);
+        });
+        let d = '';   // shading strokes under the belly
+        for (let i = 0; i < 3; i++) {
+            const y = c.y + c.h * 0.08 + i * c.h * 0.13, x0 = c.x - c.w * (0.26 - i * 0.04) + (rs() - 0.5) * 2, len = c.w * (0.34 - i * 0.05);
+            d += 'M' + x0.toFixed(1) + ',' + y.toFixed(1) + ' q ' + (len / 2).toFixed(1) + ',' + (2 + rs() * 2).toFixed(1) + ' ' + len.toFixed(1) + ',' + ((rs() - 0.5) * 1.2).toFixed(1);
+        }
+        svgEl('path', { d, fill: 'none', stroke: 'currentColor', 'stroke-width': 0.5, 'stroke-opacity': 0.45, 'stroke-linecap': 'round' }, g);
+        return g;
+    }
+
+    // Forked lightning: midpoint-displaced main channel plus 2–3 branches. New seed → new bolt.
+    function jag(rand, x1, y1, x2, y2, disp, depth, out) {
+        if (depth === 0) { out.push([x2, y2]); return; }
+        const mx = (x1 + x2) / 2 + (rand() - 0.5) * disp, my = (y1 + y2) / 2 + (rand() - 0.5) * disp * 0.35;
+        jag(rand, x1, y1, mx, my, disp / 2, depth - 1, out);
+        jag(rand, mx, my, x2, y2, disp / 2, depth - 1, out);
+    }
+    function boltPath(rand) {
+        const pts = [[0, -75]];
+        jag(rand, 0, -75, (rand() - 0.5) * 40, 75, 34, 5, pts);
+        const f = (p) => p[0].toFixed(1) + ',' + p[1].toFixed(1);
+        let d = 'M' + pts.map(f).join(' L');
+        const nb = 2 + Math.floor(rand() * 2);
+        for (let n = 0; n < nb; n++) {
+            const i = 5 + Math.floor(rand() * (pts.length - 12));
+            const b = [pts[i]], dir = rand() < 0.5 ? -1 : 1, len = 22 + rand() * 26;
+            jag(rand, pts[i][0], pts[i][1], pts[i][0] + dir * len * 0.7, pts[i][1] + len, 14, 3, b);
+            d += ' M' + b.map(f).join(' L');
+        }
+        return d;
+    }
+
+    // Appends gradient, patterns, a clip on the closed path and the glyph layers to an <svg> element.
     // `after`: the element to insert the glyph group behind (keeps the open spline and moon on top).
     function appendWeatherLayers(svgNode, innerPathId, prefix, after) {
         const defs = svgEl('defs', {}, svgNode);
         const clip = svgEl('clipPath', { id: prefix + '-clip' }, defs);
         svgEl('use', { href: '#' + innerPathId }, clip);
-        const patterns = [];
-        const rain = svgEl('pattern', { id: prefix + '-rain', patternUnits: 'userSpaceOnUse', width: 14, height: 16, patternTransform: 'rotate(14)' }, defs);
-        svgEl('line', Object.assign({ x1: 3, y1: 1, x2: 3, y2: 8, 'stroke-width': 0.9 }, LINE), rain);
-        svgEl('line', Object.assign({ x1: 10, y1: 8, x2: 10, y2: 15, 'stroke-width': 0.9 }, LINE), rain);
-        const snow = svgEl('pattern', { id: prefix + '-snow', patternUnits: 'userSpaceOnUse', width: 22, height: 22 }, defs);
-        asterisk(snow, 6, 6, 2.3); asterisk(snow, 17, 15, 1.7);
-        const fog = svgEl('pattern', { id: prefix + '-fog', patternUnits: 'userSpaceOnUse', width: 46, height: 11 }, defs);
-        svgEl('line', Object.assign({ x1: 2, y1: 5.5, x2: 30, y2: 5.5, 'stroke-width': 0.8 }, LINE), fog);
-        patterns.push(rain, snow, fog);
+        const inkNodes = [];
+        const grad = svgEl('radialGradient', { id: prefix + '-cloudfill', cx: 0.5, cy: 0.55, r: 0.6 }, defs);
+        [[0, 0.24], [0.65, 0.12], [1, 0]].forEach(([o, op]) => svgEl('stop', { offset: o, 'stop-color': 'currentColor', 'stop-opacity': op }, grad));
+        inkNodes.push(grad);
+
+        const rain = svgEl('pattern', { id: prefix + '-rain', patternUnits: 'userSpaceOnUse', width: 20, height: 24, patternTransform: 'rotate(14)' }, defs);
+        const rainLines = [0, 1].map(() => svgEl('line', Object.assign({ 'stroke-width': 0.9 }, LINE), rain));
+        const snow = svgEl('pattern', { id: prefix + '-snow', patternUnits: 'userSpaceOnUse', width: 30, height: 30 }, defs);
+        const snowAst = [asterisk(snow, 0.7), asterisk(snow, 0.7)];
+        const fog = svgEl('pattern', { id: prefix + '-fog', patternUnits: 'userSpaceOnUse', width: 52, height: 18 }, defs);
+        const fogLine = svgEl('line', Object.assign({ 'stroke-width': 0.8 }, LINE), fog);
+        const hail = svgEl('pattern', { id: prefix + '-hail', patternUnits: 'userSpaceOnUse', width: 24, height: 24 }, defs);
+        const hailDots = [0, 1].map(() => svgEl('circle', { r: 1.3, fill: 'none', stroke: 'currentColor', 'stroke-width': 0.7 }, hail));
+        inkNodes.push(rain, snow, fog, hail);
+
+        // Pattern density: intensity 0 → sparse tiles, 1 → dense tiles. Light weather = few repetitions.
+        const last = {};
+        const dens = {
+            rain(I) { const w = lerp(40, 10, I), h = lerp(46, 13, I), len = lerp(5, 9, I);
+                rain.setAttribute('width', w.toFixed(2)); rain.setAttribute('height', h.toFixed(2));
+                setLine(rainLines[0], w * 0.28, h * 0.06, w * 0.28, h * 0.06 + len);
+                setLine(rainLines[1], w * 0.74, h * 0.54, w * 0.74, h * 0.54 + len); },
+            snow(I) { const s = lerp(54, 18, I), r = lerp(1.7, 2.6, I);
+                snow.setAttribute('width', s.toFixed(2)); snow.setAttribute('height', s.toFixed(2));
+                placeAsterisk(snowAst[0], s * 0.27, s * 0.27, r); placeAsterisk(snowAst[1], s * 0.77, s * 0.68, r * 0.75); },
+            fog(I) { const h = lerp(30, 9, I), len = lerp(16, 34, I);
+                fog.setAttribute('width', (len + lerp(40, 14, I)).toFixed(2)); fog.setAttribute('height', h.toFixed(2));
+                setLine(fogLine, 2, h / 2, 2 + len, h / 2); },
+            hail(I) { const s = lerp(38, 16, I);
+                hail.setAttribute('width', s.toFixed(2)); hail.setAttribute('height', s.toFixed(2));
+                hailDots[0].setAttribute('cx', s * 0.3); hailDots[0].setAttribute('cy', s * 0.3);
+                hailDots[1].setAttribute('cx', s * 0.8); hailDots[1].setAttribute('cy', s * 0.72); }
+        };
+        for (const k in dens) { dens[k](0.5); last[k] = 0.5; }
 
         const g = svgEl('g', { class: 'weather-glyphs', 'clip-path': 'url(#' + prefix + '-clip)', 'pointer-events': 'none' });
         if (after && after.parentNode) after.parentNode.insertBefore(g, after.nextSibling); else svgNode.appendChild(g);
         const full = { x: 0, y: 0, width: E, height: E, opacity: 0 };
         const layers = {};
         layers.fog  = svgEl('rect', Object.assign({ id: prefix + '-layer-fog',  fill: 'url(#' + prefix + '-fog)' }, full), g);
-        layers.cloud = svgEl('g', { id: prefix + '-layer-cloud', opacity: 0, fill: 'none', stroke: 'currentColor', 'stroke-width': 1, 'stroke-linejoin': 'round' }, g);
-        CLOUDS.forEach(c => svgEl('path', { d: CLOUD_D, transform: 'translate(' + c.x + ',' + c.y + ') scale(' + c.s + ')' }, layers.cloud));
+        layers.cloud = svgEl('g', { id: prefix + '-layer-cloud', opacity: 1 }, g);
+        const puffs = CLOUDS.map(c => buildCloud(layers.cloud, c, prefix));
         layers.rain = svgEl('rect', Object.assign({ id: prefix + '-layer-rain', fill: 'url(#' + prefix + '-rain)' }, full), g);
         layers.snow = svgEl('rect', Object.assign({ id: prefix + '-layer-snow', fill: 'url(#' + prefix + '-snow)' }, full), g);
-        layers.bolt = svgEl('path', { id: prefix + '-layer-bolt', d: BOLT_D, transform: 'translate(214,190) scale(1.15)', opacity: 0,
-            fill: 'none', stroke: 'currentColor', 'stroke-width': 1.2, 'stroke-linejoin': 'round' }, g);
+        layers.hail = svgEl('rect', Object.assign({ id: prefix + '-layer-hail', fill: 'url(#' + prefix + '-hail)' }, full), g);
+        // pale and glowing, independent of the ink: it has to read on the dark storm window
+        layers.bolt = svgEl('g', { id: prefix + '-layer-bolt', opacity: 0, fill: 'none', stroke: 'hsl(52,100%,92%)', 'stroke-linecap': 'round', 'stroke-linejoin': 'round' }, g);
+        const boltPaths = [[4.5, 0.16], [2, 0.35], [0.8, 1]].map(([w, op]) => svgEl('path', { 'stroke-width': w, 'stroke-opacity': op }, layers.bolt));
+        function newBolt(seed) {
+            const d = boltPath(rng(seed == null ? Math.floor(Math.random() * 1e9) : seed));
+            boltPaths.forEach(p => p.setAttribute('d', d));
+        }
+        newBolt(42);
+
         return {
-            layers,
-            // Anchor the cloud cluster and the bolt where the window actually is (its centroid);
+            layers, newBolt,
+            // Anchor the cloud bank and the bolt where the window actually is (its centroid);
             // `sel` is an optional d3 transition factory for a smooth move with the hands.
             setAnchor(cx, cy, sel) {
                 const cloudT = 'translate(' + (cx - E / 2) + ',' + (cy - E / 2) + ')';
-                const boltT  = 'translate(' + cx + ',' + cy + ') scale(1.15)';
+                const boltT  = 'translate(' + cx + ',' + cy + ')';
                 if (sel) { sel(layers.cloud).attr('transform', cloudT); sel(layers.bolt).attr('transform', boltT); }
                 else { layers.cloud.setAttribute('transform', cloudT); layers.bolt.setAttribute('transform', boltT); }
             },
-            setInk(ink) { g.setAttribute('color', ink); patterns.forEach(p => p.setAttribute('color', ink)); },
-            setOpacities(o) { for (const k in layers) layers[k].setAttribute('opacity', (o[k] || 0).toFixed(3)); }
+            setInk(ink) { g.setAttribute('color', ink); inkNodes.forEach(p => p.setAttribute('color', ink)); },
+            // o: layer opacities (fog rain snow hail bolt), cloud = cover 0..1, and optional densities (rainD …).
+            setOpacities(o) {
+                for (const k of ['fog', 'rain', 'snow', 'hail', 'bolt']) layers[k].setAttribute('opacity', (o[k] || 0).toFixed(3));
+                const cover = o.cloud || 0;
+                puffs.forEach((p, i) => p.setAttribute('opacity', (Math.min(1, Math.max(0, (cover - CLOUDS[i].thr) / 0.15)) * 0.9).toFixed(3)));
+                for (const k in dens) {
+                    const v = o[k + 'D'];
+                    if (v != null && Math.abs(v - last[k]) > 0.004) { dens[k](v); last[k] = v; }
+                }
+            }
         };
     }
 
-    // Target opacity per layer for a weather object { code, cloudCover, precip }.
+    // Target layer state for a weather object { code, cloudCover, precip }:
+    // opacities per layer, cloud cover for the bank, and a density per active pattern.
     function weatherLayerTargets(w) {
-        const c = w.code || 0, cc = w.cloudCover || 0, p = w.precip || 0;
-        const t = { cloud: 0, rain: 0, snow: 0, fog: 0, bolt: 0 };
-        t.cloud = Math.min(1, Math.max(0, (cc - 0.15) / 0.7)) * 0.55;
-        if (c === 45 || c === 48) { t.fog = 0.5; t.cloud = Math.min(t.cloud, 0.2); }
-        const drizzle = c >= 51 && c <= 57;
-        const rain = (c >= 61 && c <= 67) || (c >= 80 && c <= 82) || c >= 95;
-        const snow = (c >= 71 && c <= 77) || c === 85 || c === 86;
-        const strength = Math.min(1, p / 4);          // 4 mm/h and up reads as full
-        if (drizzle) t.rain = 0.22;
-        if (rain)    t.rain = 0.35 + 0.25 * strength;
-        if (snow)    t.snow = 0.45 + 0.3 * strength;
-        if (!rain && !drizzle && !snow && p > 0) t.rain = 0.2 + 0.3 * strength;   // code says dry, sensor says wet
-        if (c >= 95) t.bolt = 0.4;
+        const k = classifyWeather(w), I = k.intensity;
+        const t = { cloud: k.kind === 'fog' ? k.cover * 0.4 : k.cover, rain: 0, snow: 0, fog: 0, hail: 0, bolt: 0 };
+        if (k.kind === 'fog') { t.fog = 0.3 + 0.3 * I; t.fogD = I; }
+        if (k.kind === 'drizzle' || k.kind === 'rain' || k.kind === 'storm') { t.rain = 0.3 + 0.35 * I; t.rainD = I; }
+        if (k.kind === 'snow') { t.snow = 0.4 + 0.3 * I; t.snowD = I; }
+        if (k.kind === 'storm') t.bolt = 0.5;
+        if (k.hail) { t.hail = 0.5; t.hailD = I; }
         return t;
     }
 
@@ -630,13 +804,12 @@
     function computeTargetInner(env) {
         const base = lookupStops(INNER_STOPS, env.sun.altitudeDeg);
         const w = env.weather;
-        const tint = weatherTint(w.code);
-        const strength = weatherStrength(w.code, w.cloudCover);
-        let out = lerpHsl(base, tint, strength);
-        // Precipitation darkens and desaturates the sky window a little (saturates at ~5 mm/h).
-        const rain = Math.min(1, (w.precip || 0) / 5);
-        out[1] = out[1] * (1 - 0.25 * rain);
-        out[2] = out[2] - 10 * rain;
+        const k = classifyWeather(w);
+        let out = lerpHsl(base, weatherTint(k), weatherStrength(k));
+        // Wet weather darkens and desaturates the sky window a little, more the heavier it is.
+        const wet = PRECIP_REF[k.kind] ? k.intensity : 0;
+        out[1] = out[1] * (1 - 0.25 * wet);
+        out[2] = out[2] - 10 * wet;
         out[0] = (out[0] + env.modifiers.innerHueShift + 360) % 360;
         out[1] = Math.max(0, Math.min(100, out[1] * (1 + env.modifiers.innerSatBoost)));
         out[2] = Math.max(0, Math.min(100, out[2] + env.modifiers.innerLightBoost * 100));
@@ -694,7 +867,8 @@
             current.moonPhase = easeScalar(current.moonPhase, targetPhase, dtMs, TAU.moonPhase, speed);
             current.ink = easeHsl(current.ink, computeTargetInk(current.sky[2]), dtMs, TAU.ink, speed);
             const tg = weatherLayerTargets(env.weather);
-            for (const k in tg) current.glyphs[k] = easeScalar(current.glyphs[k], tg[k], dtMs, TAU.weather, speed);
+            // densities (…D) only exist while their pattern is active: adopt the first value, ease afterwards
+            for (const k in tg) current.glyphs[k] = (k in current.glyphs) ? easeScalar(current.glyphs[k], tg[k], dtMs, TAU.weather, speed) : tg[k];
         }
 
         // Wobble (golden hour / thunder): a small periodic lightness shift on inner.
@@ -715,8 +889,8 @@
         if (moonOutline) moonOutline.attr('stroke', ink).attr('stroke-opacity', 0.5);
         if (weatherGlyphs) {
             const o = Object.assign({}, current.glyphs);
-            // Lightning: faint bolt, with an occasional flash (about one tick in eight).
-            if (o.bolt > 0.05 && Math.random() < 0.125) o.bolt = Math.min(1, o.bolt * 2.4);
+            // Lightning: a faint bolt, and about one tick in eight a flash with a freshly forked one.
+            if (o.bolt > 0.05 && Math.random() < 0.125) { o.bolt = Math.min(1, o.bolt * 2.4); weatherGlyphs.newBolt(); }
             weatherGlyphs.setInk(ink);
             weatherGlyphs.setOpacities(o);
             const pts = [clock.center, clock.points.HOUR, clock.points.MINUTE, clock.points.SECOND];
@@ -966,7 +1140,7 @@
         snap: () => { firstPaint = true; },   // next tick jumps straight to target colours
         internals: {
             computeEnvironment, computeTargetSky, computeTargetInner, computeMoonBrightHsl, inkForLightness,
-            appendWeatherLayers, weatherLayerTargets,
+            appendWeatherLayers, weatherLayerTargets, WMO, classifyWeather,
             moonPath, moonPhase, sunPosition, solsticeEquinox, findNextEclipse, eclipsePeak,
             currentLocation, currentWeather, fetchWeather, saveCached,
             cache, STORAGE_KEYS, NEUTRAL_WEATHER, fmtHsl

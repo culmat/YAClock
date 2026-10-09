@@ -17,7 +17,7 @@
     // PROD internals, assigned in attach() from hooks.internals (pure functions + caches).
     let currentLocation, currentWeather, NEUTRAL_WEATHER,
         computeEnvironment, computeTargetSky, computeTargetInner, computeMoonBrightHsl, inkForLightness, fmtHsl,
-        appendWeatherLayers, weatherLayerTargets,
+        appendWeatherLayers, weatherLayerTargets, WMO, classifyWeather,
         moonPath, moonPhase, sunPosition, solsticeEquinox, findNextEclipse, eclipsePeak;
 
     // ============================================================
@@ -107,7 +107,7 @@
                 const [k, v] = pair.split(':');
                 if (k && v !== undefined) wo[k] = isFinite(+v) ? +v : v;
             });
-            sim.weatherOverride = wo;
+            sim.weatherOverride = wmoDefaults(wo);
         }
     }
 
@@ -143,11 +143,6 @@
         { v: 86400,  label: '1 day / s' },
         { v: 604800, label: '1 week / s' }
     ];
-    const WMO_CODES = [
-        [0, '0 clear'], [1, '1 mainly clear'], [2, '2 partly cloudy'], [3, '3 overcast'], [45, '45 fog'],
-        [51, '51 drizzle'], [61, '61 rain'], [63, '63 moderate rain'], [65, '65 heavy rain'],
-        [71, '71 snow'], [73, '73 moderate snow'], [80, '80 showers'], [95, '95 thunderstorm']
-    ];
     const PLACES = [
         ['Basel', 47.56, 7.59], ['Reykjavík', 64.15, -21.94], ['Tromsø', 69.65, 18.96],
         ['Longyearbyen', 78.22, 15.63], ['Quito', -0.18, -78.47], ['Honolulu', 21.31, -157.86],
@@ -178,6 +173,13 @@
         const j = await r.json();
         const hit = j.results && j.results[0];
         return hit ? { lat: hit.latitude, lon: hit.longitude, label: hit.name + (hit.country_code ? ', ' + hit.country_code : '') } : null;
+    }
+
+    // Fill in a code's typical cloud cover / precipitation where the caller gave only the code.
+    function wmoDefaults(w) {
+        const out = Object.assign({}, w), d = WMO[out.code];
+        if (d) { if (out.cloudCover === undefined) out.cloudCover = d.cloud; if (out.precip === undefined) out.precip = d.precip; }
+        return out;
     }
 
     function fmtDt(d) {
@@ -219,7 +221,7 @@
 <hr>
 <div class="row"><label>weather</label><select id="sim-code" style="${field}"></select></div>
 <div class="row"><label>cloud</label><div><input id="sim-cloud" type="range" min="0" max="100" value="30"> <span id="sim-cloud-v"></span></div></div>
-<div class="row"><label>precip</label><div><input id="sim-precip" type="range" min="0" max="10" step="0.1" value="0"> <span id="sim-precip-v"></span></div></div>
+<div class="row"><label>precip</label><div><input id="sim-precip" type="range" min="0" max="15" step="0.1" value="0"> <span id="sim-precip-v"></span></div></div>
 <div class="row"><label></label><button id="sim-wx-clear" style="${btn};justify-self:start" title="drop the override, back to live weather">real weather</button></div>
 <hr>
 <div class="row"><label>place</label><div style="display:flex;gap:4px">
@@ -249,7 +251,7 @@
         const modeSnap = $('sim-mode-snap'), modeEase = $('sim-mode-ease'), modeHint = $('sim-mode-hint');
 
         SPEEDS.forEach(s => speed.add(new Option(s.label, String(s.v))));
-        WMO_CODES.forEach(([v, l]) => code.add(new Option(l, String(v))));
+        Object.keys(WMO).map(Number).forEach(c => code.add(new Option(c + ' ' + WMO[c].label, String(c))));
         PLACES.forEach(([name, lat, lon]) => preset.add(new Option(name, lat + ',' + lon)));
 
         // --- time / speed / mode
@@ -275,7 +277,12 @@
         // --- weather
         const weatherFromUI = () => ({ code: +code.value, cloudCover: +cloud.value / 100, precip: +precip.value });
         const onWx = () => setSim({ enabled: true, weatherOverride: weatherFromUI() });
-        code.addEventListener('change', onWx);
+        // Picking a code loads its typical cloud cover and precipitation; the sliders then refine it.
+        code.addEventListener('change', () => {
+            const d = WMO[+code.value];
+            if (d) { cloud.value = Math.round(d.cloud * 100); precip.value = d.precip; }
+            onWx();
+        });
         cloud.addEventListener('input', onWx);
         precip.addEventListener('input', onWx);
         $('sim-wx-clear').addEventListener('click', () => { setSim({ weatherOverride: null }); syncWeatherInputs(); });
@@ -353,6 +360,7 @@
                 + ' · moon ' + (env.moon.illumination * 100).toFixed(0) + '% ' + (env.moon.waxing ? 'waxing' : 'waning')
                 + '\nweather ' + (sim.enabled && sim.weatherOverride ? 'override' : 'live') + ': code ' + w.code
                 + ' · cloud ' + ((w.cloudCover || 0) * 100).toFixed(0) + '% · precip ' + (w.precip || 0) + ' mm/h'
+                + '\n→ draws ' + (() => { const k = classifyWeather(w); return k.kind + (k.intensity ? ' at ' + Math.round(k.intensity * 100) + '% intensity' : '') + ', ' + Math.round(k.cover * 100) + '% cloud cover'; })()
                 + (w.isStale && !(sim.enabled && sim.weatherOverride) ? ' · stale' : '')
                 + '\n' + (env.surprises.length ? 'surprises: ' + env.surprises.join(', ') : 'no surprise active');
         }
@@ -466,11 +474,15 @@
         { label: 'astronomical dawn',      time: '2026-06-21T04:00',      weather: { code: 0,  cloudCover: 0.1,  precip: 0 } },
         { label: 'sunrise clear',          time: '2026-06-21T05:30',      weather: { code: 0,  cloudCover: 0.1,  precip: 0 } },
         { label: 'midday clear (summer)',  time: '2026-06-21T13:00',      weather: { code: 0,  cloudCover: 0,    precip: 0 } },
-        { label: 'overcast',               time: '2026-06-21T10:09:35',   weather: { code: 3,  cloudCover: 1,    precip: 0 } },
-        { label: 'morning fog',            time: '2026-10-12T07:40:35',   weather: { code: 45, cloudCover: 0.9,  precip: 0 } },
-        { label: 'rain',                   time: '2026-06-21T10:09:35',   weather: { code: 63, cloudCover: 0.95, precip: 3 } },
-        { label: 'thunderstorm',           time: '2026-07-15T16:09:35',   weather: { code: 95, cloudCover: 1,    precip: 5 } },
-        { label: 'winter snow',            time: '2026-12-21T10:09:35',   weather: { code: 73, cloudCover: 1,    precip: 1 } },
+        { label: 'overcast',               time: '2026-06-21T10:09:35',   weather: { code: 3 } },
+        { label: 'morning fog',            time: '2026-10-12T07:40:35',   weather: { code: 45 } },
+        { label: 'light drizzle',          time: '2026-06-21T10:09:35',   weather: { code: 51 } },
+        { label: 'slight rain',            time: '2026-06-21T10:09:35',   weather: { code: 61 } },
+        { label: 'heavy rain',             time: '2026-06-21T10:09:35',   weather: { code: 65 } },
+        { label: 'thunderstorm',           time: '2026-07-15T16:09:35',   weather: { code: 95 } },
+        { label: 'hailstorm',              time: '2026-07-15T16:09:35',   weather: { code: 99 } },
+        { label: 'slight snow',            time: '2026-12-21T10:09:35',   weather: { code: 71 } },
+        { label: 'heavy snow',             time: '2026-12-21T10:09:35',   weather: { code: 75 } },
         { label: 'sunset golden hour',     time: '2026-06-21T21:20',      weather: { code: 0,  cloudCover: 0.1,  precip: 0 } },
         { label: 'civil twilight',         time: '2026-06-21T22:10',      weather: { code: 0,  cloudCover: 0.2,  precip: 0 } },
         { label: 'full moon night',        time: '2026-05-31T02:00',      weather: { code: 0,  cloudCover: 0,    precip: 0 } },
@@ -486,7 +498,7 @@
     }
     function scenarioWeather(s) {
         if (!s.weather || s.weather === 'live') return currentWeather();
-        return Object.assign({}, NEUTRAL_WEATHER, s.weather, { isStale: false });
+        return Object.assign({}, NEUTRAL_WEATHER, wmoDefaults(s.weather), { isStale: false });
     }
     function scenarioTime(s) {
         if (s.time === 'live') return new Date();
@@ -629,7 +641,9 @@
             const altDeg = env.sun.altitudeDeg.toFixed(1);
             const phasePct = (env.moon.illumination * 100).toFixed(0);
             const ts = s.time === 'live' ? 'now' : s.time.replace('T', ' ').slice(0, 16);
-            const wc = (s.weather === 'live' || !s.weather) ? '(live)' : 'code=' + s.weather.code + ' c=' + (s.weather.cloudCover * 100).toFixed(0) + '%';
+            const wk = classifyWeather(env.weather);
+            const wc = ((s.weather === 'live' || !s.weather) ? '(live) ' : '') + 'code ' + env.weather.code + ' · ' + wk.kind
+                + (wk.intensity ? ' ' + Math.round(wk.intensity * 100) + '%' : '') + ' · cloud ' + Math.round(wk.cover * 100) + '%';
             meta.innerHTML = ts + '<br>sun ' + altDeg + '° · moon ' + phasePct + '%<br>' + wc
                 + (env.surprises.length ? '<br><span style="color:#ffb86c">· ' + env.surprises.join(' · ') + '</span>' : '');
             cell.appendChild(meta);
@@ -655,7 +669,7 @@
         hooks = devHooks;
         ({ currentLocation, currentWeather, NEUTRAL_WEATHER,
            computeEnvironment, computeTargetSky, computeTargetInner, computeMoonBrightHsl, inkForLightness, fmtHsl,
-        appendWeatherLayers, weatherLayerTargets,
+        appendWeatherLayers, weatherLayerTargets, WMO, classifyWeather,
            moonPath, moonPhase, sunPosition, solsticeEquinox, findNextEclipse, eclipsePeak } = hooks.internals);
 
         parseHash();
@@ -710,5 +724,5 @@
         });
     }
 
-    window.AdaptiveClockDev = { attach, sim, getNow, setSim };
+    window.AdaptiveClockDev = { attach, sim, getNow, setSim, scenarios: GALLERY_SCENARIOS };
 })();

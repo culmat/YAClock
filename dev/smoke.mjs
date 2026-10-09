@@ -110,6 +110,30 @@ async function openPage(url) {
   await page.screenshot({ path: `${OUT}/dev-storm.png` });
   check('dev: thunderstorm shows rain + bolt', (await glyph('rain')) > 0.3 && (await glyph('bolt')) > 0.3, `bolt ${await glyph('bolt')}`);
   await page.selectOption('#sim-code', '63'); await page.waitForTimeout(300);
+  // picking a code loads its typical cloud cover and precipitation into the sliders
+  const sl = await page.evaluate(() => ({ cloud: Number(document.querySelector('#sim-cloud').value), precip: Number(document.querySelector('#sim-precip').value) }));
+  check('dev: code 63 loads typical cloud 90 % / precip 2.5', sl.cloud === 90 && sl.precip === 2.5, JSON.stringify(sl));
+  // light weather has fewer repetitions than heavy weather
+  const tile = async () => page.evaluate(() => Number(document.getElementById('yaclock-wx-rain').getAttribute('width')));
+  await page.selectOption('#sim-code', '61'); await page.waitForTimeout(300); const lightTile = await tile();
+  await page.selectOption('#sim-code', '65'); await page.waitForTimeout(300); const heavyTile = await tile();
+  check('dev: slight rain is much sparser than heavy rain', lightTile > heavyTile * 2, `tile ${lightTile.toFixed(1)} vs ${heavyTile.toFixed(1)} px`);
+  const snowTile = async () => page.evaluate(() => Number(document.getElementById('yaclock-wx-snow').getAttribute('width')));
+  await page.selectOption('#sim-code', '71'); await page.waitForTimeout(300); const lightSnow = await snowTile();
+  await page.selectOption('#sim-code', '75'); await page.waitForTimeout(300); const heavySnow = await snowTile();
+  check('dev: slight snow is sparser than heavy snow', lightSnow > heavySnow * 1.8, `tile ${lightSnow.toFixed(1)} vs ${heavySnow.toFixed(1)} px`);
+  // hail appears only for hail codes
+  await page.selectOption('#sim-code', '99'); await page.waitForTimeout(300);
+  check('dev: code 99 shows hail', (await glyph('hail')) > 0.3, `hail ${await glyph('hail')}`);
+  // cloud bank grows with cover
+  const puffs = async () => page.evaluate(() => [...document.querySelectorAll('#yaclock-wx-layer-cloud > g')].filter(g => Number(g.getAttribute('opacity')) > 0.02).length);
+  await page.selectOption('#sim-code', '1'); await page.waitForTimeout(300);
+  await page.evaluate(() => { const e = document.querySelector('#sim-cloud'); e.value = 20; e.dispatchEvent(new Event('input')); }); await page.waitForTimeout(300);
+  const few = await puffs();
+  await page.evaluate(() => { const e = document.querySelector('#sim-cloud'); e.value = 100; e.dispatchEvent(new Event('input')); }); await page.waitForTimeout(300);
+  const many = await puffs();
+  check('dev: cloud bank grows with cloud cover', few >= 1 && many > few, `${few} -> ${many} clouds`);
+  await page.selectOption('#sim-code', '63'); await page.waitForTimeout(300);
   const wxSeen = await page.evaluate(() => AdaptiveClock._dev.internals.currentWeather().code);
   check('dev: prod sees weather override', wxSeen === 63, String(wxSeen));
   // the time field follows the clock
@@ -167,9 +191,9 @@ async function openPage(url) {
   await page.keyboard.press('Shift+G'); await page.waitForTimeout(800);
   const gal = await page.evaluate(() => {
     const g = document.querySelector('#yaclock-gallery');
-    return { present: !!g, cells: g ? g.querySelectorAll('svg').length : 0 };
+    return { present: !!g, cells: g ? g.querySelectorAll('svg').length : 0, expected: AdaptiveClockDev.scenarios.length };
   });
-  check('dev: gallery opens with 17 scenarios', gal.present && gal.cells === 17, JSON.stringify(gal));
+  check('dev: gallery shows one cell per scenario', gal.present && gal.cells === gal.expected && gal.expected >= 20, JSON.stringify(gal));
   await page.screenshot({ path: `${OUT}/dev-gallery.png` });
   await page.evaluate(() => { const g = document.querySelector('#yaclock-gallery'); g.scrollTop = g.scrollHeight; });
   await page.waitForTimeout(300);
