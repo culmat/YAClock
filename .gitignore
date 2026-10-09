@@ -10,3 +10,4 @@ android/app/build/
 android/local.properties
 *.jks
 *.keystore
+/secrets
