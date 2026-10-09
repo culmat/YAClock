@@ -1,0 +1,1 @@
+A calm fullscreen clock: hours, minutes and seconds drawn as one flowing curve.

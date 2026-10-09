@@ -1,0 +1,1 @@
+First release: fullscreen, offline, keeps the screen on.

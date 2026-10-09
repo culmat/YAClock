@@ -1,0 +1,25 @@
+# Template for gitlab.com/fdroid/fdroiddata: copy to metadata/io.github.culmat.yaclock.yml in a fork and open a merge request.
+Categories:
+  - Clock
+License: GPL-3.0-only
+AuthorName: Matthias Cullmann
+SourceCode: https://github.com/culmat/YAClock
+IssueTracker: https://github.com/culmat/YAClock/issues
+
+AutoName: YAClock
+
+RepoType: git
+Repo: https://github.com/culmat/YAClock.git
+
+Builds:
+  - versionName: 1.0.0
+    versionCode: 1
+    commit: v1.0.0
+    subdir: android/app
+    gradle:
+      - yes
+
+AutoUpdateMode: Version
+UpdateCheckMode: Tags
+CurrentVersion: 1.0.0
+CurrentVersionCode: 1

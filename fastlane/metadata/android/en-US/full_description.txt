@@ -1,0 +1,10 @@
+<p>YAClock (yet another clock) turns the time into a single shape. The hour, minute and second marks sit on three circles, and smooth curves connect them through the center, so the figure slowly changes all day long.</p>
+<p>Made to sit on a shelf or nightstand:</p>
+<ul>
+<li>true fullscreen, with no status or navigation bar</li>
+<li>keeps the screen on while it is open</li>
+<li>works in portrait and landscape, on phones and tablets</li>
+<li>fully offline: needs no permissions at all, not even internet access</li>
+<li>no ads, no tracking, free software (GPL-3.0)</li>
+</ul>
+<p>Also available as a web app: open https://culmat.github.io/YAClock/fav.html and add it to your home screen.</p>

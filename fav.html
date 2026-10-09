@@ -2,13 +2,17 @@
 <html>
 <head>
 <meta charset="UTF-8">
-<meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=yes">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=yes, viewport-fit=cover">
 <meta name="apple-mobile-web-app-capable" content="yes">
 <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
 <meta name="mobile-web-app-capable" content="yes">
 <meta name="mobile-web-app-status-bar-style" content="black-translucent">
-<title>clock</title>
-<script src="https://d3js.org/d3.v6.min.js"></script>
+<meta name="theme-color" content="#fcd6a1">
+<title>YAClock</title>
+<link rel="manifest" href="fav.webmanifest">
+<link rel="icon" href="icons/icon-192.png" type="image/png">
+<link rel="apple-touch-icon" href="icons/apple-touch-icon.png">
+<script src="lib/d3.v6.min.js"></script>
 <script src="clock.js"></script>
 <style>
     * {
@@ -45,7 +49,28 @@
 					}
 				}
 			});
-		
+
+		// Keep the screen on while the clock is visible (re-acquired after the tab returns).
+		let wakeLock = null;
+		const keepAwake = () => {
+			if (!('wakeLock' in navigator) || wakeLock || document.hidden) return;
+			navigator.wakeLock.request('screen').then(l => {
+				wakeLock = l;
+				l.addEventListener('release', () => { wakeLock = null; });
+			}).catch(() => {});
+		};
+		keepAwake();
+		document.addEventListener('visibilitychange', keepAwake);
+		// In a plain browser tab a tap goes fullscreen; installed apps already are.
+		document.addEventListener('click', () => {
+			keepAwake();
+			const de = document.documentElement;
+			if (document.fullscreenEnabled && !document.fullscreenElement && de.requestFullscreen)
+				de.requestFullscreen().catch(() => {});
+		});
+
+		if ('serviceWorker' in navigator && location.protocol.startsWith('http'))
+			navigator.serviceWorker.register('sw.js', { scope: './fav.html' }).catch(() => {});
 	</script>
 </body>
 </html>

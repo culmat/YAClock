@@ -1,0 +1,19 @@
+{
+  "id": "./fav.html",
+  "name": "YAClock",
+  "short_name": "YAClock",
+  "description": "Yet another clock: hours, minutes and seconds drawn as one flowing curve.",
+  "start_url": "./fav.html",
+  "scope": "./fav.html",
+  "display": "fullscreen",
+  "display_override": ["fullscreen", "standalone"],
+  "orientation": "any",
+  "background_color": "#fcd6a1",
+  "theme_color": "#fcd6a1",
+  "categories": ["utilities", "lifestyle"],
+  "icons": [
+    { "src": "icons/icon-192.png", "sizes": "192x192", "type": "image/png", "purpose": "any" },
+    { "src": "icons/icon-512.png", "sizes": "512x512", "type": "image/png", "purpose": "any" },
+    { "src": "icons/icon-maskable-512.png", "sizes": "512x512", "type": "image/png", "purpose": "maskable" }
+  ]
+}

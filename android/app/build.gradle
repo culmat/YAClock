@@ -1,0 +1,62 @@
+plugins {
+    id 'com.android.application'
+}
+
+// The app is fav.html from the repo root, shipped as offline assets (no INTERNET permission).
+def webAssets = tasks.register('webAssets', Sync) {
+    from(rootProject.file('..')) {
+        include 'fav.html', 'clock.js', 'lib/d3.v6.min.js', 'lib/LICENSE-d3'
+    }
+    into layout.buildDirectory.dir('generated/web')
+}
+tasks.named('preBuild') { dependsOn webAssets }
+
+// Release signing comes from the environment (CI secrets); without it the release APK is unsigned.
+def keystore = System.getenv('YACLOCK_KEYSTORE')
+
+android {
+    namespace = 'io.github.culmat.yaclock'
+    compileSdk = 35
+
+    defaultConfig {
+        applicationId = 'io.github.culmat.yaclock'
+        minSdk = 21
+        targetSdk = 35
+        versionCode = 1
+        versionName = '1.0.0'
+    }
+
+    compileOptions {
+        sourceCompatibility = JavaVersion.VERSION_11
+        targetCompatibility = JavaVersion.VERSION_11
+    }
+
+    sourceSets {
+        main.assets.srcDirs += layout.buildDirectory.dir('generated/web').get().asFile
+    }
+
+    signingConfigs {
+        if (keystore) {
+            release {
+                storeFile = file(keystore)
+                storePassword = System.getenv('YACLOCK_KEYSTORE_PASSWORD')
+                keyAlias = System.getenv('YACLOCK_KEY_ALIAS')
+                keyPassword = System.getenv('YACLOCK_KEY_PASSWORD')
+            }
+        }
+    }
+
+    buildTypes {
+        release {
+            minifyEnabled = false
+            if (keystore) signingConfig = signingConfigs.release
+            vcsInfo.include = false // keeps release builds reproducible for F-Droid
+        }
+    }
+
+    // No Google-encrypted dependency metadata blob (F-Droid / IzzyOnDroid reject it).
+    dependenciesInfo {
+        includeInApk = false
+        includeInBundle = false
+    }
+}
